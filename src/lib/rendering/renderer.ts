@@ -22,10 +22,7 @@ function rgba(hex: string, a: number): string {
 function lerpColor(c1: string, c2: string, t: number): string {
   const [r1, g1, b1] = parseHex(c1);
   const [r2, g2, b2] = parseHex(c2);
-  const r = Math.round(r1 + (r2 - r1) * t);
-  const g = Math.round(g1 + (g2 - g1) * t);
-  const b = Math.round(b1 + (b2 - b1) * t);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  return `#${Math.round(r1 + (r2 - r1) * t).toString(16).padStart(2, '0')}${Math.round(g1 + (g2 - g1) * t).toString(16).padStart(2, '0')}${Math.round(b1 + (b2 - b1) * t).toString(16).padStart(2, '0')}`;
 }
 
 function energyAt(curve: number[], t: number): number {
@@ -34,6 +31,185 @@ function energyAt(curve: number[], t: number): number {
   const lo = Math.floor(idx);
   const hi = Math.min(lo + 1, curve.length - 1);
   return curve[lo] * (1 - (idx - lo)) + curve[hi] * (idx - lo);
+}
+
+// ==================== Overlay Layers ====================
+// These are composited on top of the primary mode to add complexity.
+
+function overlayNoiseTexture(ctx: CanvasRenderingContext2D, w: number, h: number, fbm: NoiseFunction2D, palette: string[], intensity: number, scale: number) {
+  const blockSize = Math.max(2, Math.floor(Math.min(w, h) / (60 + (1 - intensity) * 80)));
+  for (let y = 0; y < h; y += blockSize) {
+    for (let x = 0; x < w; x += blockSize) {
+      const n = fbm((x / w) * scale * 4, (y / h) * scale * 4) * 0.5 + 0.5;
+      if (n > 0.4) {
+        const ci = Math.floor(n * palette.length) % palette.length;
+        ctx.fillStyle = rgba(palette[ci], n * intensity * 0.15);
+        ctx.fillRect(x, y, blockSize, blockSize);
+      }
+    }
+  }
+}
+
+function overlayVoronoiTessellation(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, palette: string[], cellCount: number, lineAlpha: number) {
+  const seeds: Array<{ x: number; y: number; color: string }> = [];
+  for (let i = 0; i < cellCount; i++) {
+    seeds.push({ x: rng.nextFloat(0, w), y: rng.nextFloat(0, h), color: palette[i % palette.length] });
+  }
+  const blockSize = Math.max(3, Math.floor(Math.min(w, h) / 120));
+  const gridW = Math.ceil(w / blockSize);
+  const gridH = Math.ceil(h / blockSize);
+  const nearest = new Int32Array(gridW * gridH);
+  for (let gy = 0; gy < gridH; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      const px = gx * blockSize + blockSize / 2;
+      const py = gy * blockSize + blockSize / 2;
+      let minD = Infinity, minI = 0;
+      for (let s = 0; s < seeds.length; s++) {
+        const d = (px - seeds[s].x) ** 2 + (py - seeds[s].y) ** 2;
+        if (d < minD) { minD = d; minI = s; }
+      }
+      nearest[gy * gridW + gx] = minI;
+    }
+  }
+  for (let gy = 0; gy < gridH; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      const idx = nearest[gy * gridW + gx];
+      if (gx < gridW - 1 && nearest[gy * gridW + gx + 1] !== idx) {
+        ctx.fillStyle = rgba(seeds[idx].color, lineAlpha);
+        ctx.fillRect((gx + 1) * blockSize - 1, gy * blockSize, 1, blockSize);
+      }
+      if (gy < gridH - 1 && nearest[(gy + 1) * gridW + gx] !== idx) {
+        ctx.fillStyle = rgba(seeds[idx].color, lineAlpha);
+        ctx.fillRect(gx * blockSize, (gy + 1) * blockSize - 1, blockSize, 1);
+      }
+    }
+  }
+}
+
+function overlayTriangleTessellation(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, palette: string[], density: number, alpha: number) {
+  const cellSize = Math.max(15, Math.floor(60 - density * 40));
+  const cols = Math.ceil(w / cellSize) + 1;
+  const rows = Math.ceil(h / cellSize) + 1;
+  const jitter = cellSize * 0.3;
+  const points: number[][] = [];
+  for (let r = 0; r <= rows; r++) {
+    points[r] = [];
+    for (let c = 0; c <= cols; c++) {
+      points[r][c] = 0;
+    }
+  }
+  for (let r = 0; r <= rows; r++) {
+    for (let c = 0; c <= cols; c++) {
+      const x = c * cellSize + (r % 2 === 0 ? 0 : cellSize / 2) + rng.nextFloat(-jitter, jitter);
+      const y = r * cellSize + rng.nextFloat(-jitter, jitter);
+      const ci = rng.nextInt(0, palette.length - 1);
+      ctx.fillStyle = rgba(palette[ci], alpha * (0.3 + rng.next() * 0.5));
+      ctx.beginPath();
+      const x2 = x + cellSize + rng.nextFloat(-jitter, jitter);
+      const y2 = y + cellSize + rng.nextFloat(-jitter, jitter);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x2, y);
+      ctx.lineTo(rng.nextFloat(Math.min(x, x2), Math.max(x, x2)), y2);
+      ctx.closePath();
+      if (rng.next() > 0.3) ctx.fill(); else ctx.stroke();
+    }
+  }
+}
+
+function overlayHexGrid(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, palette: string[], size: number, alpha: number) {
+  const hexH = size * 2;
+  const hexW = Math.sqrt(3) * size;
+  const rows = Math.ceil(h / (hexH * 0.75)) + 1;
+  const cols = Math.ceil(w / hexW) + 1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cx = c * hexW + (r % 2 === 0 ? 0 : hexW / 2);
+      const cy = r * hexH * 0.75;
+      const ci = rng.nextInt(0, palette.length - 1);
+      ctx.strokeStyle = rgba(palette[ci], alpha * (0.2 + rng.next() * 0.4));
+      ctx.lineWidth = 0.5 + rng.next() * 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        const px = cx + Math.cos(angle) * size;
+        const py = cy + Math.sin(angle) * size;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      if (rng.next() < 0.2) {
+        ctx.fillStyle = rgba(palette[ci], alpha * 0.1);
+        ctx.fill();
+      }
+      ctx.stroke();
+    }
+  }
+}
+
+function overlayScratches(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, palette: string[], count: number, lineWidth: number) {
+  for (let i = 0; i < count; i++) {
+    const x = rng.nextFloat(0, w);
+    const y = rng.nextFloat(0, h);
+    const angle = rng.nextFloat(0, Math.PI * 2);
+    const len = rng.nextFloat(20, Math.min(w, h) * 0.8);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    ctx.strokeStyle = rgba(color, 0.03 + rng.next() * 0.12);
+    ctx.lineWidth = lineWidth * (0.1 + rng.next() * 0.4);
+    ctx.lineCap = rng.next() > 0.5 ? 'round' : 'butt';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    const midX = x + Math.cos(angle) * len * 0.5 + rng.nextFloat(-15, 15);
+    const midY = y + Math.sin(angle) * len * 0.5 + rng.nextFloat(-15, 15);
+    ctx.quadraticCurveTo(midX, midY, x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+    ctx.stroke();
+  }
+}
+
+function overlayDotField(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, noiseFn: NoiseFunction2D, palette: string[], count: number, scale: number) {
+  for (let i = 0; i < count; i++) {
+    const x = rng.nextFloat(0, w);
+    const y = rng.nextFloat(0, h);
+    const n = noiseFn(x / w * 3, y / h * 3) * 0.5 + 0.5;
+    const size = (0.3 + n * 3) * scale;
+    const ci = Math.floor(n * palette.length) % palette.length;
+    ctx.fillStyle = rgba(palette[ci], 0.05 + n * 0.2);
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function overlayConcentricRings(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, palette: string[], ringCount: number, lineWidth: number) {
+  const cx = rng.nextFloat(w * 0.2, w * 0.8);
+  const cy = rng.nextFloat(h * 0.2, h * 0.8);
+  const maxR = rng.nextFloat(50, Math.min(w, h) * 0.45);
+  for (let i = 0; i < ringCount; i++) {
+    const t = (i + 1) / ringCount;
+    const r = maxR * t;
+    const ci = i % palette.length;
+    ctx.strokeStyle = rgba(palette[ci], 0.04 + t * 0.1);
+    ctx.lineWidth = lineWidth * (0.1 + t * 0.5);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function overlaySymmetry(ctx: CanvasRenderingContext2D, w: number, h: number, folds: number) {
+  if (folds <= 1) return;
+  const offscreen = document.createElement('canvas');
+  offscreen.width = w; offscreen.height = h;
+  offscreen.getContext('2d')!.drawImage(ctx.canvas, 0, 0);
+  const angleStep = (Math.PI * 2) / folds;
+  for (let s = 1; s < folds; s++) {
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(angleStep * s);
+    ctx.translate(-w / 2, -h / 2);
+    ctx.globalAlpha = 0.35;
+    ctx.drawImage(offscreen, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
 }
 
 // ==================== Shared Backgrounds ====================
@@ -70,15 +246,23 @@ function bgNoise(ctx: CanvasRenderingContext2D, w: number, h: number, fbm: Noise
   }
 }
 
-// ==================== Visual Modes ====================
+function bgRadialGradient(ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[]) {
+  bgSolid(ctx, w, h, palette[0]);
+  const cx = w / 2, cy = h / 2;
+  const r = Math.max(w, h) * 0.7;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  for (let i = 0; i < Math.min(4, palette.length); i++) {
+    g.addColorStop(i / Math.max(1, Math.min(3, palette.length - 1)), rgba(palette[i], 0.4));
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+}
+
+// ==================== Primary Visual Modes ====================
 
 function modeWaveform(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
-  const { palette, energyCurve, density, complexity, lineWidth, symmetry, scale, contrast } = scene;
-  bgGradient(ctx, w, h, palette, rng.nextFloat(0, 180));
-
+  const { palette, energyCurve, density, complexity, lineWidth, scale, contrast } = scene;
   const lineCount = Math.max(5, Math.floor(density * 40));
-  const centerY = h / 2;
-
   for (let i = 0; i < lineCount; i++) {
     const yBase = (i / (lineCount - 1)) * h;
     const amplitude = h * 0.05 * scale * (0.5 + energyAt(energyCurve, i / lineCount) * 1.5);
@@ -86,11 +270,10 @@ function modeWaveform(ctx: CanvasRenderingContext2D, w: number, h: number, scene
     const phase = rng.nextFloat(0, Math.PI * 2);
     const color = palette[i % palette.length];
     const alpha = 0.15 + contrast * 0.3 + energyAt(energyCurve, i / lineCount) * 0.3;
-
     ctx.beginPath();
     ctx.strokeStyle = rgba(color, alpha);
     ctx.lineWidth = lineWidth * (0.3 + rng.next() * 0.7);
-
+    ctx.lineCap = rng.next() > 0.5 ? 'round' : 'butt';
     for (let x = 0; x <= w; x += 2) {
       const t = x / w;
       const e = energyAt(energyCurve, t);
@@ -100,99 +283,53 @@ function modeWaveform(ctx: CanvasRenderingContext2D, w: number, h: number, scene
     }
     ctx.stroke();
   }
-
-  if (symmetry > 1) {
-    const offscreen = document.createElement('canvas');
-    offscreen.width = w; offscreen.height = h;
-    const offCtx = offscreen.getContext('2d')!;
-    offCtx.drawImage(ctx.canvas, 0, 0);
-    const angleStep = (Math.PI * 2) / symmetry;
-    for (let s = 1; s < symmetry; s++) {
-      ctx.save();
-      ctx.translate(w / 2, h / 2);
-      ctx.rotate(angleStep * s);
-      ctx.translate(-w / 2, -h / 2);
-      ctx.globalAlpha = 0.4;
-      ctx.drawImage(offscreen, 0, 0);
-      ctx.globalAlpha = 1;
-      ctx.restore();
-    }
-  }
 }
 
 function modeFractalTree(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG) {
   const { palette, density, complexity, lineWidth, scale, contrast, energyCurve } = scene;
-  const bgAngle = rng.nextFloat(0, 360);
-  bgGradient(ctx, w, h, palette, bgAngle);
-
   const treeCount = Math.max(1, Math.floor(density * 8));
   const maxDepth = Math.max(3, Math.floor(complexity * 10));
-
   function drawBranch(x: number, y: number, len: number, angle: number, depth: number, colorIdx: number) {
     if (depth <= 0 || len < 2) return;
     const endX = x + Math.cos(angle) * len;
     const endY = y + Math.sin(angle) * len;
     const t = depth / maxDepth;
-    const color = palette[colorIdx % palette.length];
-    const alpha = 0.1 + t * 0.6 * contrast;
-    const lw = lineWidth * (0.2 + t * 1.2);
-
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(endX, endY);
-    ctx.strokeStyle = rgba(color, alpha);
-    ctx.lineWidth = lw;
+    ctx.strokeStyle = rgba(palette[colorIdx % palette.length], 0.1 + t * 0.6 * contrast);
+    ctx.lineWidth = lineWidth * (0.2 + t * 1.2);
     ctx.lineCap = 'round';
     ctx.stroke();
-
     const branchAngle = rng.nextFloat(0.2, 0.9) * scale;
     const branchLen = len * rng.nextFloat(0.55, 0.8);
     const energy = energyAt(energyCurve, 1 - t);
-
     drawBranch(endX, endY, branchLen * (0.8 + energy * 0.4), angle + branchAngle, depth - 1, (colorIdx + 1) % palette.length);
     drawBranch(endX, endY, branchLen * (0.8 + energy * 0.4), angle - branchAngle, depth - 1, (colorIdx + 2) % palette.length);
-    if (rng.next() < 0.3 * complexity) {
-      drawBranch(endX, endY, branchLen * 0.6, angle + rng.nextFloat(-0.2, 0.2), depth - 2, (colorIdx + 3) % palette.length);
-    }
+    if (rng.next() < 0.3 * complexity) drawBranch(endX, endY, branchLen * 0.6, angle + rng.nextFloat(-0.2, 0.2), depth - 2, (colorIdx + 3) % palette.length);
   }
-
   for (let t = 0; t < treeCount; t++) {
-    const startX = rng.nextFloat(w * 0.1, w * 0.9);
-    const startY = rng.nextFloat(h * 0.6, h * 0.95);
-    const startLen = rng.nextFloat(60, 150) * scale;
-    const startAngle = -Math.PI / 2 + rng.nextFloat(-0.4, 0.4);
-    drawBranch(startX, startY, startLen, startAngle, maxDepth, t % palette.length);
+    drawBranch(rng.nextFloat(w * 0.1, w * 0.9), rng.nextFloat(h * 0.6, h * 0.95), rng.nextFloat(60, 150) * scale, -Math.PI / 2 + rng.nextFloat(-0.4, 0.4), maxDepth, t % palette.length);
   }
 }
 
 function modeConstellation(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
   const { palette, density, complexity, lineWidth, scale, contrast, glowIntensity } = scene;
-  bgSolid(ctx, w, h, palette[0]);
-
   const count = Math.floor(density * 200) + 30;
   const points: Array<{ x: number; y: number; size: number; color: string }> = [];
-
   for (let i = 0; i < count; i++) {
     const nx = rng.nextFloat(0, w);
     const ny = rng.nextFloat(0, h);
     const noise = noiseFn(nx / w * complexity * 4, ny / h * complexity * 4);
-    const x = nx + noise * 30 * scale;
-    const y = ny + noise * 30 * scale;
-    const size = 0.5 + rng.next() * 3 * scale;
-    points.push({ x, y, size, color: palette[rng.nextInt(0, palette.length - 1)] });
+    points.push({ x: nx + noise * 30 * scale, y: ny + noise * 30 * scale, size: 0.5 + rng.next() * 3 * scale, color: palette[rng.nextInt(0, palette.length - 1)] });
   }
-
   const maxDist = Math.min(w, h) * (0.05 + density * 0.15);
   ctx.lineWidth = lineWidth * 0.3;
-
   for (let i = 0; i < points.length; i++) {
     for (let j = i + 1; j < points.length; j++) {
-      const dx = points[i].x - points[j].x;
-      const dy = points[i].y - points[j].y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < maxDist) {
-        const alpha = (1 - dist / maxDist) * 0.3 * contrast;
-        ctx.strokeStyle = rgba(points[i].color, alpha);
+      const d = Math.sqrt((points[i].x - points[j].x) ** 2 + (points[i].y - points[j].y) ** 2);
+      if (d < maxDist) {
+        ctx.strokeStyle = rgba(points[i].color, (1 - d / maxDist) * 0.3 * contrast);
         ctx.beginPath();
         ctx.moveTo(points[i].x, points[i].y);
         ctx.lineTo(points[j].x, points[j].y);
@@ -200,12 +337,8 @@ function modeConstellation(ctx: CanvasRenderingContext2D, w: number, h: number, 
       }
     }
   }
-
   for (const p of points) {
-    if (glowIntensity > 0.5) {
-      ctx.shadowBlur = glowIntensity * 8;
-      ctx.shadowColor = rgba(p.color, 0.6);
-    }
+    if (glowIntensity > 0.5) { ctx.shadowBlur = glowIntensity * 8; ctx.shadowColor = rgba(p.color, 0.6); }
     ctx.fillStyle = rgba(p.color, 0.5 + contrast * 0.3);
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
@@ -216,70 +349,44 @@ function modeConstellation(ctx: CanvasRenderingContext2D, w: number, h: number, 
 
 function modeTopographic(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D, fbm: NoiseFunction2D) {
   const { palette, density, complexity, lineWidth, scale, contrast } = scene;
-  bgNoise(ctx, w, h, fbm, palette, 1);
-
   const levels = Math.max(5, Math.floor(density * 25));
   const resolution = Math.max(2, Math.floor(6 - complexity * 4));
-
   for (let level = 0; level < levels; level++) {
     const threshold = level / levels;
-    const color = palette[level % palette.length];
-    const alpha = 0.1 + contrast * 0.3 + (level / levels) * 0.3;
-
     ctx.beginPath();
-    ctx.strokeStyle = rgba(color, alpha);
+    ctx.strokeStyle = rgba(palette[level % palette.length], 0.1 + contrast * 0.3 + (level / levels) * 0.3);
     ctx.lineWidth = lineWidth * (0.3 + (level / levels) * 0.7);
-
     for (let y = 0; y < h; y += resolution) {
       for (let x = 0; x < w; x += resolution) {
-        const nx = (x / w) * complexity * 6;
-        const ny = (y / h) * complexity * 6;
-        const n = fbm(nx, ny) * 0.5 + 0.5;
-
-        if (Math.abs(n - threshold) < 0.02 * scale) {
-          ctx.rect(x, y, resolution, resolution);
-        }
+        const n = fbm((x / w) * complexity * 6, (y / h) * complexity * 6) * 0.5 + 0.5;
+        if (Math.abs(n - threshold) < 0.02 * scale) ctx.rect(x, y, resolution, resolution);
       }
     }
     ctx.stroke();
   }
 }
 
-function modeExpressionist(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
-  const { palette, density, complexity, lineWidth, scale, contrast, turbulence } = scene;
-  bgGradient(ctx, w, h, palette, rng.nextFloat(0, 360));
-
+function modeExpressionist(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG) {
+  const { palette, density, lineWidth, scale, contrast, turbulence } = scene;
   const strokeCount = Math.floor(density * 200) + 20;
-
   for (let i = 0; i < strokeCount; i++) {
     const x = rng.nextFloat(0, w);
     const y = rng.nextFloat(0, h);
     const angle = rng.nextFloat(0, Math.PI * 2);
     const len = rng.nextFloat(20, 200) * scale;
     const color = palette[rng.nextInt(0, palette.length - 1)];
-    const alpha = 0.1 + rng.next() * 0.5 * contrast;
-    const lw = lineWidth * (0.3 + rng.next() * 2.0);
-
-    ctx.beginPath();
-    ctx.strokeStyle = rgba(color, alpha);
-    ctx.lineWidth = lw;
+    ctx.strokeStyle = rgba(color, 0.1 + rng.next() * 0.5 * contrast);
+    ctx.lineWidth = lineWidth * (0.3 + rng.next() * 2.0);
     ctx.lineCap = 'round';
-
-    const cx = x + Math.cos(angle) * len * 0.5;
-    const cy = y + Math.sin(angle) * len * 0.5 + rng.nextFloat(-20, 20) * turbulence;
+    ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.quadraticCurveTo(cx, cy, x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+    ctx.quadraticCurveTo(x + Math.cos(angle) * len * 0.5, y + Math.sin(angle) * len * 0.5 + rng.nextFloat(-20, 20) * turbulence, x + Math.cos(angle) * len, y + Math.sin(angle) * len);
     ctx.stroke();
-
     if (rng.next() < 0.15 * density) {
-      const splatterCount = rng.nextInt(3, 10);
-      for (let s = 0; s < splatterCount; s++) {
-        const sx = x + rng.gaussian() * 30 * scale;
-        const sy = y + rng.gaussian() * 30 * scale;
-        const sr = rng.nextFloat(1, 6) * scale;
+      for (let s = 0; s < rng.nextInt(3, 10); s++) {
         ctx.fillStyle = rgba(color, 0.2 + rng.next() * 0.4);
         ctx.beginPath();
-        ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+        ctx.arc(x + rng.gaussian() * 30 * scale, y + rng.gaussian() * 30 * scale, rng.nextFloat(1, 6) * scale, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -288,14 +395,11 @@ function modeExpressionist(ctx: CanvasRenderingContext2D, w: number, h: number, 
 
 function modeGeometric(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG) {
   const { palette, density, complexity, lineWidth, scale, contrast, symmetry } = scene;
-  bgGradient(ctx, w, h, palette, rng.nextFloat(0, 360));
-
   const cols = Math.max(2, Math.floor(density * 12));
   const rows = Math.max(2, Math.floor(density * 12));
   const cellW = w / cols;
   const cellH = h / rows;
   const shapes = ['circle', 'rect', 'triangle', 'diamond', 'cross'] as const;
-
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       if (rng.next() > 0.3 + density * 0.5) continue;
@@ -305,84 +409,39 @@ function modeGeometric(ctx: CanvasRenderingContext2D, w: number, h: number, scen
       const color = palette[(r + c) % palette.length];
       const alpha = 0.15 + contrast * 0.3 + rng.next() * 0.3;
       const shape = shapes[rng.nextInt(0, Math.min(shapes.length - 1, Math.floor(complexity * shapes.length)))];
-
       ctx.fillStyle = rgba(color, alpha);
       ctx.strokeStyle = rgba(color, alpha + 0.1);
       ctx.lineWidth = lineWidth * 0.5;
       ctx.beginPath();
-
       switch (shape) {
-        case 'circle':
-          ctx.arc(cx, cy, size, 0, Math.PI * 2);
-          break;
-        case 'rect': {
-          const angle = rng.nextFloat(0, Math.PI / symmetry);
-          ctx.save();
-          ctx.translate(cx, cy);
-          ctx.rotate(angle);
-          ctx.rect(-size, -size, size * 2, size * 2);
-          ctx.restore();
-          break;
-        }
-        case 'triangle':
-          ctx.moveTo(cx, cy - size);
-          ctx.lineTo(cx - size, cy + size);
-          ctx.lineTo(cx + size, cy + size);
-          ctx.closePath();
-          break;
-        case 'diamond':
-          ctx.moveTo(cx, cy - size);
-          ctx.lineTo(cx + size * 0.6, cy);
-          ctx.lineTo(cx, cy + size);
-          ctx.lineTo(cx - size * 0.6, cy);
-          ctx.closePath();
-          break;
-        case 'cross':
-          ctx.rect(cx - size * 0.2, cy - size, size * 0.4, size * 2);
-          ctx.rect(cx - size, cy - size * 0.2, size * 2, size * 0.4);
-          break;
+        case 'circle': ctx.arc(cx, cy, size, 0, Math.PI * 2); break;
+        case 'rect': { ctx.save(); ctx.translate(cx, cy); ctx.rotate(rng.nextFloat(0, Math.PI / symmetry)); ctx.rect(-size, -size, size * 2, size * 2); ctx.restore(); break; }
+        case 'triangle': ctx.moveTo(cx, cy - size); ctx.lineTo(cx - size, cy + size); ctx.lineTo(cx + size, cy + size); ctx.closePath(); break;
+        case 'diamond': ctx.moveTo(cx, cy - size); ctx.lineTo(cx + size * 0.6, cy); ctx.lineTo(cx, cy + size); ctx.lineTo(cx - size * 0.6, cy); ctx.closePath(); break;
+        case 'cross': ctx.rect(cx - size * 0.2, cy - size, size * 0.4, size * 2); ctx.rect(cx - size, cy - size * 0.2, size * 2, size * 0.4); break;
       }
       if (rng.next() > 0.5) ctx.fill(); else ctx.stroke();
     }
   }
 }
 
-function modeHatching(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
-  const { palette, density, complexity, lineWidth, scale, contrast } = scene;
-  bgSolid(ctx, w, h, palette[0]);
-
+function modeHatching(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG) {
+  const { palette, density, complexity, lineWidth, contrast } = scene;
   const bandCount = Math.max(3, Math.floor(density * 10));
   const baseAngle = rng.nextFloat(0, Math.PI);
   const lineSpacing = Math.max(2, Math.floor(8 - density * 5));
-
   for (let band = 0; band < bandCount; band++) {
     const bandY = (band / bandCount) * h;
     const bandH = h / bandCount;
     const angle = baseAngle + (band / bandCount) * complexity * Math.PI * 0.5;
-    const color = palette[band % palette.length];
     const density2 = 0.3 + rng.next() * 0.7;
-
-    ctx.strokeStyle = rgba(color, 0.1 + contrast * 0.3 + density2 * 0.2);
+    ctx.strokeStyle = rgba(palette[band % palette.length], 0.1 + contrast * 0.3 + density2 * 0.2);
     ctx.lineWidth = lineWidth * (0.2 + rng.next() * 0.5);
-
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const diag = Math.sqrt(w * w + h * h);
-
+    const cos = Math.cos(angle), sin = Math.sin(angle), diag = Math.sqrt(w * w + h * h);
     for (let d = -diag; d < diag; d += lineSpacing * (1 / density2)) {
       ctx.beginPath();
-      const startX = w / 2 + cos * d - sin * diag;
-      const startY = bandY + bandH / 2 + sin * d + cos * diag;
-      const endX = w / 2 + cos * d + sin * diag;
-      const endY = bandY + bandH / 2 + sin * d - cos * diag;
-
-      const clippedStartX = Math.max(0, Math.min(w, startX));
-      const clippedStartY = Math.max(bandY, Math.min(bandY + bandH, startY));
-      const clippedEndX = Math.max(0, Math.min(w, endX));
-      const clippedEndY = Math.max(bandY, Math.min(bandY + bandH, endY));
-
-      ctx.moveTo(clippedStartX, clippedStartY);
-      ctx.lineTo(clippedEndX, clippedEndY);
+      ctx.moveTo(Math.max(0, Math.min(w, w / 2 + cos * d - sin * diag)), Math.max(bandY, Math.min(bandY + bandH, bandY + bandH / 2 + sin * d + cos * diag)));
+      ctx.lineTo(Math.max(0, Math.min(w, w / 2 + cos * d + sin * diag)), Math.max(bandY, Math.min(bandY + bandH, bandY + bandH / 2 + sin * d - cos * diag)));
       ctx.stroke();
     }
   }
@@ -390,79 +449,43 @@ function modeHatching(ctx: CanvasRenderingContext2D, w: number, h: number, scene
 
 function modeMosaic(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
   const { palette, density, complexity, contrast, scale } = scene;
-  bgSolid(ctx, w, h, palette[0]);
-
   const cellSize = Math.max(8, Math.floor(40 - density * 30));
   const cols = Math.ceil(w / cellSize);
   const rows = Math.ceil(h / cellSize);
-
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const x = c * cellSize;
-      const y = r * cellSize;
-      const nx = (x / w) * complexity * 4;
-      const ny = (y / h) * complexity * 4;
-      const n = noiseFn(nx, ny) * 0.5 + 0.5;
-      const colorIdx = Math.floor(n * palette.length) % palette.length;
-      const brightness = 0.1 + n * 0.5 + contrast * 0.2;
-
-      ctx.fillStyle = rgba(palette[colorIdx], brightness);
+      const x = c * cellSize, y = r * cellSize;
+      const n = noiseFn((x / w) * complexity * 4, (y / h) * complexity * 4) * 0.5 + 0.5;
+      const ci = Math.floor(n * palette.length) % palette.length;
+      ctx.fillStyle = rgba(palette[ci], 0.1 + n * 0.5 + contrast * 0.2);
       ctx.fillRect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1);
-
       if (rng.next() < 0.1 * complexity) {
-        ctx.fillStyle = rgba(palette[(colorIdx + 2) % palette.length], brightness * 0.5);
+        ctx.fillStyle = rgba(palette[(ci + 2) % palette.length], (0.1 + n * 0.5 + contrast * 0.2) * 0.5);
         const subSize = cellSize * 0.4 * scale;
         ctx.fillRect(x + cellSize / 2 - subSize / 2, y + cellSize / 2 - subSize / 2, subSize, subSize);
       }
     }
   }
-
-  ctx.strokeStyle = rgba(palette[3 % palette.length], 0.1 + contrast * 0.1);
-  ctx.lineWidth = 0.5;
-  for (let r = 0; r <= rows; r++) {
-    ctx.beginPath();
-    ctx.moveTo(0, r * cellSize);
-    ctx.lineTo(w, r * cellSize);
-    ctx.stroke();
-  }
-  for (let c = 0; c <= cols; c++) {
-    ctx.beginPath();
-    ctx.moveTo(c * cellSize, 0);
-    ctx.lineTo(c * cellSize, h);
-    ctx.stroke();
-  }
 }
 
 function modeConcentric(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
   const { palette, density, complexity, lineWidth, scale, contrast, symmetry } = scene;
-  bgGradient(ctx, w, h, palette, rng.nextFloat(0, 360));
-
   const centerCount = Math.max(1, Math.floor(density * 5));
   const ringsPerCenter = Math.max(3, Math.floor(complexity * 15));
-
   for (let c = 0; c < centerCount; c++) {
     const cx = rng.nextFloat(w * 0.15, w * 0.85);
     const cy = rng.nextFloat(h * 0.15, h * 0.85);
     const maxRadius = rng.nextFloat(80, Math.min(w, h) * 0.4) * scale;
-
     for (let r = 0; r < ringsPerCenter; r++) {
       const t = (r + 1) / ringsPerCenter;
       const radius = maxRadius * t;
-      const color = palette[r % palette.length];
-      const alpha = 0.05 + contrast * 0.2 + t * 0.3;
-      const lw = lineWidth * (0.2 + t * 0.8);
-
-      ctx.strokeStyle = rgba(color, alpha);
-      ctx.lineWidth = lw;
+      ctx.strokeStyle = rgba(palette[r % palette.length], 0.05 + contrast * 0.2 + t * 0.3);
+      ctx.lineWidth = lineWidth * (0.2 + t * 0.8);
       ctx.beginPath();
-
       const segments = Math.max(20, Math.floor(symmetry * 8));
       for (let s = 0; s <= segments; s++) {
         const angle = (s / segments) * Math.PI * 2;
-        const wobble = 1 + noiseFn(
-          Math.cos(angle) * complexity * 2 + c,
-          Math.sin(angle) * complexity * 2 + r * 0.3
-        ) * 0.2 * scale;
+        const wobble = 1 + noiseFn(Math.cos(angle) * complexity * 2 + c, Math.sin(angle) * complexity * 2 + r * 0.3) * 0.2 * scale;
         const px = cx + Math.cos(angle) * radius * wobble;
         const py = cy + Math.sin(angle) * radius * wobble;
         if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
@@ -475,46 +498,25 @@ function modeConcentric(ctx: CanvasRenderingContext2D, w: number, h: number, sce
 
 function modeScatter(ctx: CanvasRenderingContext2D, w: number, h: number, scene: SceneDefinition, rng: RNG, noiseFn: NoiseFunction2D) {
   const { palette, density, complexity, scale, contrast } = scene;
-  bgGradient(ctx, w, h, palette, rng.nextFloat(0, 360));
-
   const count = Math.floor(density * 2000) + 100;
   const shapes = ['dot', 'line', 'cross', 'ring'] as const;
-
   for (let i = 0; i < count; i++) {
     const x = rng.nextFloat(0, w);
     const y = rng.nextFloat(0, h);
     const noise = noiseFn(x / w * complexity * 4, y / h * complexity * 4) * 0.5 + 0.5;
     const size = (0.5 + noise * 4) * scale;
-    const color = palette[Math.floor(noise * palette.length) % palette.length];
+    const ci = Math.floor(noise * palette.length) % palette.length;
     const alpha = 0.1 + noise * 0.5 * contrast;
     const shape = shapes[rng.nextInt(0, Math.min(shapes.length - 1, Math.floor(complexity * shapes.length)))];
-
-    ctx.fillStyle = rgba(color, alpha);
-    ctx.strokeStyle = rgba(color, alpha);
+    ctx.fillStyle = rgba(palette[ci], alpha);
+    ctx.strokeStyle = rgba(palette[ci], alpha);
     ctx.lineWidth = 0.5;
     ctx.beginPath();
-
     switch (shape) {
-      case 'dot':
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      case 'line': {
-        const angle = noise * Math.PI * 2;
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + Math.cos(angle) * size * 4, y + Math.sin(angle) * size * 4);
-        ctx.stroke();
-        break;
-      }
-      case 'cross':
-        ctx.moveTo(x - size, y); ctx.lineTo(x + size, y);
-        ctx.moveTo(x, y - size); ctx.lineTo(x, y + size);
-        ctx.stroke();
-        break;
-      case 'ring':
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.stroke();
-        break;
+      case 'dot': ctx.arc(x, y, size, 0, Math.PI * 2); ctx.fill(); break;
+      case 'line': { const a = noise * Math.PI * 2; ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * size * 4, y + Math.sin(a) * size * 4); ctx.stroke(); break; }
+      case 'cross': ctx.moveTo(x - size, y); ctx.lineTo(x + size, y); ctx.moveTo(x, y - size); ctx.lineTo(x, y + size); ctx.stroke(); break;
+      case 'ring': ctx.arc(x, y, size, 0, Math.PI * 2); ctx.stroke(); break;
     }
   }
 }
@@ -565,7 +567,7 @@ function applyVignette(ctx: CanvasRenderingContext2D, w: number, h: number, inte
 
 // ==================== Main Renderer ====================
 
-const MODE_RENDERERS: Record<VisualMode, (
+const PRIMARY_RENDERERS: Record<VisualMode, (
   ctx: CanvasRenderingContext2D, w: number, h: number,
   scene: SceneDefinition, rng: RNG,
   noiseFn: NoiseFunction2D, fbm: NoiseFunction2D
@@ -574,38 +576,95 @@ const MODE_RENDERERS: Record<VisualMode, (
   'fractal-tree': (ctx, w, h, s, r) => modeFractalTree(ctx, w, h, s, r),
   'constellation': (ctx, w, h, s, r, n) => modeConstellation(ctx, w, h, s, r, n),
   'topographic': (ctx, w, h, s, r, n, f) => modeTopographic(ctx, w, h, s, r, n, f),
-  'expressionist': (ctx, w, h, s, r, n) => modeExpressionist(ctx, w, h, s, r, n),
+  'expressionist': (ctx, w, h, s, r) => modeExpressionist(ctx, w, h, s, r),
   'geometric': (ctx, w, h, s, r) => modeGeometric(ctx, w, h, s, r),
-  'hatching': (ctx, w, h, s, r, n) => modeHatching(ctx, w, h, s, r, n),
+  'hatching': (ctx, w, h, s, r) => modeHatching(ctx, w, h, s, r),
   'mosaic': (ctx, w, h, s, r, n) => modeMosaic(ctx, w, h, s, r, n),
   'concentric': (ctx, w, h, s, r, n) => modeConcentric(ctx, w, h, s, r, n),
   'scatter': (ctx, w, h, s, r, n) => modeScatter(ctx, w, h, s, r, n),
 };
 
-export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
-  const { width, height, scene, onProgress } = options;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d')!;
+const BG_RENDERERS = [
+  (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => bgGradient(ctx, w, h, palette, rng.nextFloat(0, 360)),
+  (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => bgNoise(ctx, w, h, fbm, palette, noiseScale),
+  (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => bgRadialGradient(ctx, w, h, palette),
+  (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => { bgSolid(ctx, w, h, palette[0]); },
+];
 
+export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
+  const { width: w, height: h, scene, onProgress } = options;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
   const rng = createRNG(scene.seed);
   const noiseFn = seededNoise2D(scene.seed);
   const fbm = createFBM(noiseFn, 6, 2.0, 0.5);
+  const turbFn = createTurbulence(noiseFn, 4, 2.0, 0.5);
 
+  // 1. Background
+  const bgIdx = rng.nextInt(0, BG_RENDERERS.length - 1);
+  BG_RENDERERS[bgIdx](ctx, w, h, scene.palette, rng, fbm, scene.density);
   onProgress?.(0.1);
 
-  const renderer = MODE_RENDERERS[scene.visualMode];
-  renderer(ctx, width, height, scene, rng, noiseFn, fbm);
+  // 2. Noise texture overlay (always, varying intensity)
+  overlayNoiseTexture(ctx, w, h, fbm, scene.palette, scene.turbulence, scene.density * 2);
+  onProgress?.(0.15);
+
+  // 3. Primary visual mode
+  const renderer = PRIMARY_RENDERERS[scene.visualMode];
+  renderer(ctx, w, h, scene, rng, noiseFn, fbm);
+  onProgress?.(0.5);
+
+  // 4. Composited overlay layers (2-5 random overlays based on scene parameters)
+  const overlayCount = 2 + Math.floor(scene.density * 3);
+  const overlayTypes = rng.shuffle([
+    'voronoi', 'triangles', 'hexgrid', 'scratches', 'dots', 'rings',
+  ]);
+
+  for (let i = 0; i < Math.min(overlayCount, overlayTypes.length); i++) {
+    const overlay = overlayTypes[i];
+    const alpha = 0.05 + scene.contrast * 0.15 + rng.next() * 0.1;
+    switch (overlay) {
+      case 'voronoi':
+        overlayVoronoiTessellation(ctx, w, h, rng, scene.palette, Math.floor(5 + scene.density * 20), alpha);
+        break;
+      case 'triangles':
+        overlayTriangleTessellation(ctx, w, h, rng, scene.palette, scene.density, alpha * 0.5);
+        break;
+      case 'hexgrid':
+        overlayHexGrid(ctx, w, h, rng, scene.palette, 15 + rng.next() * 25, alpha);
+        break;
+      case 'scratches':
+        overlayScratches(ctx, w, h, rng, scene.palette, Math.floor(10 + scene.density * 30), scene.lineWidth);
+        break;
+      case 'dots':
+        overlayDotField(ctx, w, h, rng, noiseFn, scene.palette, Math.floor(50 + scene.density * 200), scene.scale);
+        break;
+      case 'rings':
+        overlayConcentricRings(ctx, w, h, rng, scene.palette, Math.floor(3 + scene.complexity * 10), scene.lineWidth);
+        break;
+    }
+  }
   onProgress?.(0.7);
 
-  applyGrain(ctx, width, height, scene.grainIntensity, rng);
+  // 5. Symmetry fold (1-6 fold rotational symmetry, driven by scene)
+  const folds = scene.symmetry;
+  if (folds > 1) {
+    overlaySymmetry(ctx, w, h, folds);
+  }
+  onProgress?.(0.75);
+
+  // 6. Second pass of primary mode at reduced opacity (adds depth)
+  ctx.globalAlpha = 0.15 + scene.contrast * 0.2;
+  renderer(ctx, w, h, scene, rng, noiseFn, fbm);
+  ctx.globalAlpha = 1;
   onProgress?.(0.8);
 
-  applyGlow(ctx, width, height, scene.glowIntensity);
-  onProgress?.(0.9);
-
-  applyVignette(ctx, width, height, 0.5);
+  // 7. Post-processing
+  applyGrain(ctx, w, h, scene.grainIntensity, rng);
+  applyGlow(ctx, w, h, scene.glowIntensity);
+  applyVignette(ctx, w, h, 0.4 + scene.contrast * 0.2);
   onProgress?.(1.0);
 
   return canvas;
