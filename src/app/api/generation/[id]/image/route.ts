@@ -16,20 +16,30 @@ export async function POST(
       return NextResponse.json({ error: 'No image provided' }, { status: 400 });
     }
 
-    const existing = await sql`SELECT id FROM generations WHERE id = ${id} LIMIT 1`;
+    const existing = await sql`SELECT id, filename FROM generations WHERE id = ${id} LIMIT 1`;
     if (existing.length === 0) {
       return NextResponse.json({ error: 'Generation not found' }, { status: 404 });
     }
 
-    const pathname = `artwork/${id}.png`;
+    const row = existing[0] as { id: string; filename: string | null };
+    const baseFilename = row.filename ? row.filename.replace(/\.[^.]+$/, '') : id;
+
+    const pathname = `artwork/${baseFilename}.png`;
     const blob = await put(pathname, file, {
       access: 'public',
       contentType: 'image/png',
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
 
-    const thumbPathname = `artwork/${id}-thumb.png`;
-    await put(thumbPathname, file, {
+    const arrayBuf = await file.arrayBuffer();
+    const bmp = await createImageBitmap(new Blob([arrayBuf]));
+    const canvas = new OffscreenCanvas(512, 512);
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(bmp, 0, 0, 512, 512);
+    const thumbBlob = await canvas.convertToBlob({ type: 'image/png' });
+
+    const thumbPathname = `artwork/${baseFilename}-512.png`;
+    await put(thumbPathname, thumbBlob, {
       access: 'public',
       contentType: 'image/png',
       token: process.env.BLOB_READ_WRITE_TOKEN,

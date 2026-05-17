@@ -68,6 +68,7 @@ export interface Generation {
   featureVector: AudioFeatures;
   sceneDefinition: SceneDefinition;
   imageUrl: string | null;
+  filename: string | null;
   createdAt: string;
 }
 
@@ -82,6 +83,7 @@ export interface GenerateRequest {
   audioHash: string;
   featureVector: AudioFeatures;
   stylePreset: StylePreset;
+  filename?: string;
 }
 
 export interface GenerateResponse {

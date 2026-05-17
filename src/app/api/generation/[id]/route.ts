@@ -10,7 +10,7 @@ export async function GET(
 
   try {
     const rows = await sql`
-      SELECT id, audio_hash, seed, style_preset, feature_vector, scene_definition, image_url, created_at
+      SELECT id, audio_hash, seed, style_preset, feature_vector, scene_definition, image_url, filename, created_at
       FROM generations
       WHERE id = ${id}
       LIMIT 1
@@ -31,6 +31,7 @@ export async function GET(
       feature_vector: AudioFeatures;
       scene_definition: SceneDefinition;
       image_url: string | null;
+      filename: string | null;
       created_at: string;
     };
 
@@ -42,6 +43,7 @@ export async function GET(
       featureVector: row.feature_vector,
       sceneDefinition: row.scene_definition,
       imageUrl: row.image_url,
+      filename: row.filename,
       createdAt: row.created_at,
     };
 

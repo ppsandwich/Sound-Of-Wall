@@ -149,6 +149,7 @@ export default function GeneratePage() {
           audioHash: hash,
           featureVector: features,
           stylePreset: scene.stylePreset,
+          filename: audioFile?.name,
         }),
       });
 

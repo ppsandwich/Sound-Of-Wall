@@ -25,6 +25,7 @@ export async function initDatabase(): Promise<void> {
       feature_vector JSONB,
       scene_definition JSONB,
       image_url TEXT,
+      filename TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `;
@@ -36,4 +37,10 @@ export async function initDatabase(): Promise<void> {
   await sql`
     CREATE INDEX IF NOT EXISTS idx_generations_created_at ON generations(created_at DESC)
   `;
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_generations_filename ON generations(filename) WHERE filename IS NOT NULL
+  `;
 }
+
+export const MAX_GALLERY_SIZE = 50;

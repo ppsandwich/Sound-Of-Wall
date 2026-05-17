@@ -108,7 +108,7 @@ export default function HomePage() {
   const [galleryItems, setGalleryItems] = useState<Generation[]>([]);
 
   useEffect(() => {
-    fetch('/api/gallery?page=1&pageSize=6')
+    fetch('/api/gallery?page=1&pageSize=50')
       .then((res) => res.json())
       .then((data) => setGalleryItems(data.generations ?? []))
       .catch(() => {});

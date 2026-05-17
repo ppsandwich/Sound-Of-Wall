@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const total = Number((countResult[0] as { total: string | number }).total);
 
     const rows = await sql`
-      SELECT id, audio_hash, seed, style_preset, feature_vector, scene_definition, image_url, created_at
+      SELECT id, audio_hash, seed, style_preset, feature_vector, scene_definition, image_url, filename, created_at
       FROM generations
       ORDER BY created_at DESC
       LIMIT ${pageSize} OFFSET ${offset}
@@ -28,6 +28,7 @@ export async function GET(request: Request) {
         feature_vector: AudioFeatures;
         scene_definition: SceneDefinition;
         image_url: string | null;
+        filename: string | null;
         created_at: string;
       };
       return {
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
         featureVector: r.feature_vector,
         sceneDefinition: r.scene_definition,
         imageUrl: r.image_url,
+        filename: r.filename,
         createdAt: r.created_at,
       };
     });
