@@ -10,9 +10,10 @@ export async function POST(
 
   try {
     const formData = await request.formData();
-    const file = formData.get('image') as File | null;
+    const fullRes = formData.get('image') as File | null;
+    const thumbnail = formData.get('thumbnail') as File | null;
 
-    if (!file) {
+    if (!fullRes) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 });
     }
 
@@ -25,25 +26,20 @@ export async function POST(
     const baseFilename = row.filename ? row.filename.replace(/\.[^.]+$/, '') : id;
 
     const pathname = `artwork/${baseFilename}.png`;
-    const blob = await put(pathname, file, {
+    const blob = await put(pathname, fullRes, {
       access: 'public',
       contentType: 'image/png',
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
 
-    const arrayBuf = await file.arrayBuffer();
-    const bmp = await createImageBitmap(new Blob([arrayBuf]));
-    const canvas = new OffscreenCanvas(512, 512);
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(bmp, 0, 0, 512, 512);
-    const thumbBlob = await canvas.convertToBlob({ type: 'image/png' });
-
-    const thumbPathname = `artwork/${baseFilename}-512.png`;
-    await put(thumbPathname, thumbBlob, {
-      access: 'public',
-      contentType: 'image/png',
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-    });
+    if (thumbnail) {
+      const thumbPathname = `artwork/${baseFilename}-512.png`;
+      await put(thumbPathname, thumbnail, {
+        access: 'public',
+        contentType: 'image/png',
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+    }
 
     await sql`
       UPDATE generations SET image_url = ${blob.url} WHERE id = ${id}
