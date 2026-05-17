@@ -5,14 +5,13 @@ import Link from 'next/link';
 import { useAppStore } from '@/store';
 import { AudioUploader } from '@/components/upload/AudioUploader';
 import { ArtworkCanvas } from '@/components/renderer/ArtworkCanvas';
-import { StyleSelector } from '@/components/controls/StyleSelector';
 import { ExportButton } from '@/components/controls/ExportButton';
 import { extractFeatures, decodeAudioFile, normalizeAudioBuffer } from '@/lib/audio';
 import { hashAudio, hashToSeed } from '@/lib/hashing';
 import { generateScene } from '@/lib/rendering/scene-generator';
 import { canvasToBlob } from '@/lib/export';
 
-const STEPS = ['Upload', 'Analyze', 'Style', 'Generate'];
+const STEPS = ['Upload', 'Analyze', 'Generate'];
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -71,7 +70,6 @@ export default function GeneratePage() {
     audioUrl,
     audioFeatures,
     audioHash,
-    selectedStyle,
     sceneDefinition,
     setAudioFeatures,
     setAudioHash,
@@ -135,33 +133,22 @@ export default function GeneratePage() {
       await new Promise((r) => setTimeout(r, 300));
 
       setStep(2);
-    } catch (err) {
-      console.error('Analysis failed:', err);
-    } finally {
       setIsAnalyzing(false);
-    }
-  }, [audioFile, setAudioFeatures, setAudioHash, setUploadedAudioUrl, setIsAnalyzing]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!audioFeatures || !audioHash) return;
-
-    setStep(3);
-    setIsGenerating(true);
-
-    try {
-      const seed = hashToSeed(audioHash);
-      const scene = generateScene(seed, audioFeatures, selectedStyle);
-      console.log('[SOW] Audio Features:', JSON.stringify(audioFeatures, null, 2));
-      console.log('[SOW] Seed:', seed, 'Visual Mode:', scene.visualMode, 'Density:', scene.density.toFixed(2), 'Complexity:', scene.complexity.toFixed(2));
+      const seed = hashToSeed(hash);
+      const scene = generateScene(seed, features);
+      console.log('[SOW] Audio Features:', JSON.stringify(features, null, 2));
+      console.log('[SOW] Seed:', seed, 'Visual Mode:', scene.visualMode, 'Style:', scene.stylePreset, 'Density:', scene.density.toFixed(2), 'Complexity:', scene.complexity.toFixed(2), 'Scale:', scene.scale.toFixed(2), 'ScaleRange:', scene.scaleMin.toFixed(2), '-', scene.scaleMax.toFixed(2));
       setSceneDefinition(scene);
+      setIsGenerating(true);
 
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          audioHash,
-          featureVector: audioFeatures,
-          stylePreset: selectedStyle,
+          audioHash: hash,
+          featureVector: features,
+          stylePreset: scene.stylePreset,
         }),
       });
 
@@ -169,12 +156,13 @@ export default function GeneratePage() {
         const data = await response.json();
         setGenerationId(data.generationId);
       }
-    } catch (err) {
-      console.error('Generation failed:', err);
-    } finally {
       setIsGenerating(false);
+    } catch (err) {
+      console.error('Analysis failed:', err);
+    } finally {
+      setIsAnalyzing(false);
     }
-  }, [audioFeatures, audioHash, selectedStyle, setSceneDefinition, setGenerationId, setIsGenerating]);
+  }, [audioFile, setAudioFeatures, setAudioHash, setUploadedAudioUrl, setIsAnalyzing, setSceneDefinition, setGenerationId, setIsGenerating]);
 
   const handleRenderComplete = useCallback(async (canvas: HTMLCanvasElement) => {
     const genId = useAppStore.getState().generationId;
@@ -309,35 +297,6 @@ export default function GeneratePage() {
 
         {step === 2 && (
           <motion.div
-            key="style"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3 }}
-            className="mx-auto max-w-xl"
-          >
-            <h2 className="mb-2 text-xl font-bold">Choose Style</h2>
-            <p className="mb-8 text-sm text-[#888]">
-              Select a visual style for your artwork.
-            </p>
-
-            <StyleSelector />
-
-            <div className="mt-8 flex justify-end">
-              <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={handleGenerate}
-                className="rounded-xl bg-gradient-to-r from-[#5e239d] to-[#f61067] px-8 py-3 text-sm font-semibold text-white"
-              >
-                Generate
-              </motion.button>
-            </div>
-          </motion.div>
-        )}
-
-        {step === 3 && (
-          <motion.div
             key="render"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -347,7 +306,7 @@ export default function GeneratePage() {
           >
             <h2 className="mb-2 text-xl font-bold">Your Artwork</h2>
             <p className="mb-8 text-sm text-[#888]">
-              Generated from your audio using the <span className="text-[#f61067]">{selectedStyle}</span> style.
+              Generated from your audio — style selected automatically.
             </p>
 
             <ArtworkCanvas sceneDefinition={sceneDefinition} onRenderComplete={handleRenderComplete} />

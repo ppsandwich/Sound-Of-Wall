@@ -48,12 +48,16 @@ export interface SceneDefinition {
   symmetry: number;
   density: number;
   scale: number;
+  scaleMin: number;
+  scaleMax: number;
   complexity: number;
   contrast: number;
   turbulence: number;
   grainIntensity: number;
   glowIntensity: number;
   lineWidth: number;
+  overlayCount: number;
+  postProcessMask: number;
 }
 
 export interface Generation {

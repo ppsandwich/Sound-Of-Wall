@@ -31,6 +31,38 @@ const ALL_MODES: VisualMode[] = [
   'expressionist', 'geometric', 'hatching', 'mosaic', 'concentric', 'scatter',
 ];
 
+const ALL_STYLES: StylePreset[] = ['ethereal', 'noir', 'brutalist', 'psychedelic', 'minimal', 'retro-futurist'];
+
+function selectStylePreset(features: AudioFeatures, rng: RNG): StylePreset {
+  const scores = ALL_STYLES.map((style) => {
+    let score = 0;
+    switch (style) {
+      case 'ethereal':
+        score = features.warmth * 2 + features.harmonicDensity + (1 - features.noisiness) + features.brightness;
+        break;
+      case 'noir':
+        score = (1 - features.brightness) * 2 + features.dynamicRange + features.noisiness * 0.5;
+        break;
+      case 'brutalist':
+        score = features.noisiness * 2 + features.transientSharpness * 2 + features.loudness;
+        break;
+      case 'psychedelic':
+        score = features.spectralSpread * 2 + features.highEnergy + features.noisiness + features.dynamicRange;
+        break;
+      case 'minimal':
+        score = (1 - features.beatDensity) * 2 + (1 - features.noisiness) + features.warmth;
+        break;
+      case 'retro-futurist':
+        score = features.midEnergy * 2 + features.repetition + features.spectralCentroid;
+        break;
+    }
+    score += rng.next() * 3.0;
+    return { style, score };
+  });
+  scores.sort((a, b) => b.score - a.score);
+  return scores[0].style;
+}
+
 function selectVisualMode(features: AudioFeatures, rng: RNG): VisualMode {
   const scores = ALL_MODES.map((mode) => {
     let score = 0;
@@ -175,11 +207,12 @@ const STYLE_MODIFIERS: Record<StylePreset, StyleModifiers> = {
 export function generateScene(
   seed: number,
   features: AudioFeatures,
-  stylePreset: StylePreset
+  stylePreset?: StylePreset
 ): SceneDefinition {
   const rng = createRNG(seed);
-  const basePalette = getPalette(stylePreset);
-  const mods = STYLE_MODIFIERS[stylePreset];
+  const style = stylePreset ?? selectStylePreset(features, rng);
+  const basePalette = getPalette(style);
+  const mods = STYLE_MODIFIERS[style];
 
   const visualMode = selectVisualMode(features, rng);
   const colorStrategy = selectColorStrategy(features, rng);
@@ -206,6 +239,9 @@ export function generateScene(
     0.1, 3.0
   );
 
+  const scaleMin = clamp(rng.nextFloat(0.02, 0.2) * scale, 0.01, 0.5);
+  const scaleMax = clamp(rng.nextFloat(1.5, 5.0) * scale, 0.8, 8.0);
+
   const contrast = clamp(
     lerp(0.2, 1.0, features.dynamicRange * 0.4 + features.transientSharpness * 0.3 + features.noisiness * 0.3) * mods.contrastMul,
     0.1, 2.0
@@ -224,16 +260,29 @@ export function generateScene(
     0.1, 8.0
   );
 
+  const overlayCount = Math.floor(2 + density * 4 + rng.next() * 3);
+
+  let postProcessMask = 0;
+  if (grainIntensity > 0.05) postProcessMask |= 1;
+  if (glowIntensity > 0.1) postProcessMask |= 2;
+  postProcessMask |= 4;
+  if (rng.next() < 0.3 + features.noisiness * 0.3) postProcessMask |= 8;
+  if (rng.next() < 0.2 + features.spectralSpread * 0.3) postProcessMask |= 16;
+  if (rng.next() < 0.2 + features.dynamicRange * 0.3) postProcessMask |= 32;
+  if (rng.next() < 0.15 + features.brightness * 0.2) postProcessMask |= 64;
+  if (rng.next() < 0.15 + features.transientSharpness * 0.2) postProcessMask |= 128;
+  if (rng.next() < 0.1 + features.highEnergy * 0.2) postProcessMask |= 256;
+
   const palette = applyColorStrategy(
     mods.paletteTransform(basePalette, rng),
     colorStrategy, features, rng
   );
 
   return {
-    seed, palette, stylePreset, visualMode, colorStrategy,
+    seed, palette, stylePreset: style, visualMode, colorStrategy,
     energyCurve, rhythmPattern, symmetry, density, scale,
-    complexity, contrast, turbulence, grainIntensity,
-    glowIntensity, lineWidth,
+    scaleMin, scaleMax, complexity, contrast, turbulence,
+    grainIntensity, glowIntensity, lineWidth, overlayCount, postProcessMask,
   };
 }
 

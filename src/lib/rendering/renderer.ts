@@ -212,6 +212,433 @@ function overlaySymmetry(ctx: CanvasRenderingContext2D, w: number, h: number, fo
   }
 }
 
+function overlayCrosshatch(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition, noiseFn: NoiseFunction2D) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const spacing = Math.max(2, Math.floor(6 * elementScale));
+  const density = scene.density;
+  const diag = Math.sqrt(w * w + h * h);
+  const color1 = palette[rng.nextInt(0, palette.length - 1)];
+  const color2 = palette[rng.nextInt(0, palette.length - 1)];
+  const alpha = 0.04 + rng.next() * 0.12;
+  ctx.lineWidth = Math.max(0.3, elementScale * 0.8);
+  ctx.strokeStyle = rgba(color1, alpha);
+  for (let d = -diag; d < diag; d += spacing) {
+    const nx = noiseFn(d * 0.01, 0) * 0.5 + 0.5;
+    if (nx < density * 0.5) continue;
+    ctx.beginPath();
+    ctx.moveTo(w / 2 - diag + d, -diag);
+    ctx.lineTo(w / 2 + d, diag);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = rgba(color2, alpha * 0.8);
+  for (let d = -diag; d < diag; d += spacing * 1.2) {
+    const nx = noiseFn(0, d * 0.01) * 0.5 + 0.5;
+    if (nx < density * 0.4) continue;
+    ctx.beginPath();
+    ctx.moveTo(w / 2 - diag + d, diag);
+    ctx.lineTo(w / 2 + d, -diag);
+    ctx.stroke();
+  }
+}
+
+function overlayDotGradient(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition, noiseFn: NoiseFunction2D) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const gridSize = Math.max(3, Math.floor(10 * elementScale));
+  for (let y = 0; y < h; y += gridSize) {
+    for (let x = 0; x < w; x += gridSize) {
+      const n = noiseFn(x / w * 4, y / h * 4) * 0.5 + 0.5;
+      const size = Math.max(0.5, n * gridSize * 0.45 * elementScale);
+      const ci = Math.floor(n * palette.length) % palette.length;
+      ctx.fillStyle = rgba(palette[ci], 0.05 + n * 0.25);
+      ctx.beginPath();
+      ctx.arc(x + gridSize / 2, y + gridSize / 2, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function overlayWaveInterference(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const waveCount = rng.nextInt(3, 7);
+  const resolution = Math.max(1, Math.floor(3 * elementScale));
+  for (let y = 0; y < h; y += resolution) {
+    for (let x = 0; x < w; x += resolution) {
+      let val = 0;
+      for (let wi = 0; wi < waveCount; wi++) {
+        const freq = (1 + wi * rng.nextFloat(0.5, 2)) * scene.complexity * 2;
+        const angle = rng.nextFloat(0, Math.PI * 2);
+        const phase = rng.nextFloat(0, Math.PI * 2);
+        val += Math.sin((x * Math.cos(angle) + y * Math.sin(angle)) * freq / w * Math.PI * 2 + phase);
+      }
+      val /= waveCount;
+      const absVal = Math.abs(val);
+      if (absVal > 0.3) {
+        const ci = Math.floor(absVal * palette.length) % palette.length;
+        ctx.fillStyle = rgba(palette[ci], absVal * 0.15);
+        ctx.fillRect(x, y, resolution, resolution);
+      }
+    }
+  }
+}
+
+function overlaySpiralOverlay(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const spiralCount = rng.nextInt(2, 6);
+  for (let s = 0; s < spiralCount; s++) {
+    const cx = rng.nextFloat(w * 0.1, w * 0.9);
+    const cy = rng.nextFloat(h * 0.1, h * 0.9);
+    const maxRadius = rng.nextFloat(30, Math.min(w, h) * 0.5) * elementScale;
+    const turns = rng.nextFloat(2, 12);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    ctx.strokeStyle = rgba(color, 0.05 + rng.next() * 0.15);
+    ctx.lineWidth = Math.max(0.3, rng.next() * 2 * elementScale);
+    ctx.beginPath();
+    const steps = Math.floor(turns * 60);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const angle = t * turns * Math.PI * 2;
+      const r = t * maxRadius;
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+}
+
+function overlayGridDistortion(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition, noiseFn: NoiseFunction2D) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const gridSize = Math.max(10, Math.floor(30 * elementScale));
+  const cols = Math.ceil(w / gridSize) + 1;
+  const rows = Math.ceil(h / gridSize) + 1;
+  const distortAmt = 15 * scene.turbulence * elementScale;
+  ctx.lineWidth = Math.max(0.3, elementScale * 0.6);
+  const color = palette[rng.nextInt(0, palette.length - 1)];
+  ctx.strokeStyle = rgba(color, 0.06 + rng.next() * 0.1);
+  for (let r = 0; r < rows; r++) {
+    ctx.beginPath();
+    for (let c = 0; c < cols; c++) {
+      const baseX = c * gridSize;
+      const baseY = r * gridSize;
+      const dx = noiseFn(baseX / w * 5, baseY / h * 5) * distortAmt;
+      const dy = noiseFn(baseX / w * 5 + 100, baseY / h * 5 + 100) * distortAmt;
+      const px = baseX + dx;
+      const py = baseY + dy;
+      if (c === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  for (let c = 0; c < cols; c++) {
+    ctx.beginPath();
+    for (let r = 0; r < rows; r++) {
+      const baseX = c * gridSize;
+      const baseY = r * gridSize;
+      const dx = noiseFn(baseX / w * 5, baseY / h * 5) * distortAmt;
+      const dy = noiseFn(baseX / w * 5 + 100, baseY / h * 5 + 100) * distortAmt;
+      const px = baseX + dx;
+      const py = baseY + dy;
+      if (r === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+}
+
+function overlayConcentricSquares(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const centerCount = rng.nextInt(2, 5);
+  for (let ci = 0; ci < centerCount; ci++) {
+    const cx = rng.nextFloat(w * 0.15, w * 0.85);
+    const cy = rng.nextFloat(h * 0.15, h * 0.85);
+    const maxSide = rng.nextFloat(40, Math.min(w, h) * 0.5) * elementScale;
+    const rotation = rng.nextFloat(0, Math.PI / 4);
+    const ringCount = rng.nextInt(5, 20);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    for (let r = 0; r < ringCount; r++) {
+      const t = (r + 1) / ringCount;
+      const side = maxSide * t;
+      const alpha = 0.03 + t * 0.12;
+      ctx.strokeStyle = rgba(color, alpha);
+      ctx.lineWidth = Math.max(0.3, (1 - t) * 1.5 * elementScale);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rotation);
+      ctx.strokeRect(-side / 2, -side / 2, side, side);
+      ctx.restore();
+    }
+  }
+}
+
+function overlayRandomPolygons(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const count = rng.nextInt(10, 40);
+  for (let i = 0; i < count; i++) {
+    const cx = rng.nextFloat(0, w);
+    const cy = rng.nextFloat(0, h);
+    const radius = rng.nextFloat(3, 80) * elementScale;
+    const sides = rng.nextInt(3, 8);
+    const rotation = rng.nextFloat(0, Math.PI * 2);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const alpha = 0.04 + rng.next() * 0.2;
+    const fill = rng.next() > 0.4;
+    ctx.beginPath();
+    for (let s = 0; s < sides; s++) {
+      const angle = rotation + (s / sides) * Math.PI * 2;
+      const r = radius * rng.nextFloat(0.7, 1.3);
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    if (fill) {
+      ctx.fillStyle = rgba(color, alpha * 0.5);
+      ctx.fill();
+    }
+    ctx.strokeStyle = rgba(color, alpha);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.5);
+    ctx.stroke();
+  }
+}
+
+function overlayBarcodeLines(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const vertical = rng.next() > 0.5;
+  const lineCount = rng.nextInt(30, 150);
+  const color = palette[rng.nextInt(0, palette.length - 1)];
+  for (let i = 0; i < lineCount; i++) {
+    const pos = rng.nextFloat(0, vertical ? w : h);
+    const thickness = rng.nextFloat(0.5, 6) * elementScale;
+    const alpha = 0.03 + rng.next() * 0.15;
+    ctx.fillStyle = rgba(color, alpha);
+    if (vertical) {
+      ctx.fillRect(pos, 0, thickness, h);
+    } else {
+      ctx.fillRect(0, pos, w, thickness);
+    }
+  }
+}
+
+function overlayBubbleField(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const count = rng.nextInt(20, 100);
+  for (let i = 0; i < count; i++) {
+    const x = rng.nextFloat(0, w);
+    const y = rng.nextFloat(0, h);
+    const radius = rng.nextFloat(2, 80) * elementScale;
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const alpha = 0.02 + rng.next() * 0.08;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(color, alpha);
+    ctx.fill();
+    ctx.strokeStyle = rgba(color, alpha * 2);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.3);
+    ctx.stroke();
+  }
+}
+
+function overlayStippleGradient(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition, noiseFn: NoiseFunction2D) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const gridSize = Math.max(2, Math.floor(5 * elementScale));
+  for (let y = 0; y < h; y += gridSize) {
+    for (let x = 0; x < w; x += gridSize) {
+      const n = noiseFn(x / w * 5, y / h * 5) * 0.5 + 0.5;
+      const dotsInCell = Math.floor(n * 6);
+      const ci = Math.floor(n * palette.length) % palette.length;
+      ctx.fillStyle = rgba(palette[ci], 0.04 + n * 0.2);
+      for (let d = 0; d < dotsInCell; d++) {
+        const dx = x + rng.nextFloat(0, gridSize);
+        const dy = y + rng.nextFloat(0, gridSize);
+        const dotSize = rng.nextFloat(0.3, 1.5) * elementScale;
+        ctx.beginPath();
+        ctx.arc(dx, dy, dotSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+function overlayChevronPattern(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const bandCount = rng.nextInt(4, 12);
+  const bandHeight = h / bandCount;
+  for (let b = 0; b < bandCount; b++) {
+    const y = b * bandHeight;
+    const chevronWidth = rng.nextFloat(10, 50) * elementScale;
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const alpha = 0.04 + rng.next() * 0.15;
+    ctx.strokeStyle = rgba(color, alpha);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.6);
+    ctx.beginPath();
+    const count = Math.ceil(w / chevronWidth) + 1;
+    for (let i = 0; i < count; i++) {
+      const cx = i * chevronWidth;
+      const peakY = y + bandHeight * 0.2;
+      const baseY = y + bandHeight * 0.8;
+      if (i === 0) ctx.moveTo(cx, baseY);
+      ctx.lineTo(cx + chevronWidth / 2, peakY);
+      ctx.lineTo(cx + chevronWidth, baseY);
+    }
+    ctx.stroke();
+  }
+}
+
+function overlayCirclePacking(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const maxCircles = rng.nextInt(20, 80);
+  const circles: Array<{ x: number; y: number; r: number }> = [];
+  const minR = 2 * elementScale;
+  const maxR = Math.min(w, h) * 0.15 * elementScale;
+  let attempts = 0;
+  while (circles.length < maxCircles && attempts < maxCircles * 20) {
+    attempts++;
+    const x = rng.nextFloat(0, w);
+    const y = rng.nextFloat(0, h);
+    const r = rng.nextFloat(minR, maxR);
+    let overlaps = false;
+    for (const c of circles) {
+      const dist = Math.sqrt((x - c.x) ** 2 + (y - c.y) ** 2);
+      if (dist < c.r + r + 2) { overlaps = true; break; }
+    }
+    if (!overlaps) {
+      circles.push({ x, y, r });
+      const color = palette[rng.nextInt(0, palette.length - 1)];
+      const alpha = 0.04 + rng.next() * 0.15;
+      if (rng.next() > 0.4) {
+        ctx.fillStyle = rgba(color, alpha * 0.5);
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.strokeStyle = rgba(color, alpha);
+      ctx.lineWidth = Math.max(0.3, elementScale * 0.4);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+function overlayArcSegments(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const count = rng.nextInt(10, 40);
+  for (let i = 0; i < count; i++) {
+    const cx = rng.nextFloat(0, w);
+    const cy = rng.nextFloat(0, h);
+    const radius = rng.nextFloat(5, 100) * elementScale;
+    const startAngle = rng.nextFloat(0, Math.PI * 2);
+    const arcLen = rng.nextFloat(0.3, Math.PI * 1.5);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const alpha = 0.05 + rng.next() * 0.2;
+    ctx.strokeStyle = rgba(color, alpha);
+    ctx.lineWidth = Math.max(0.3, rng.next() * 3 * elementScale);
+    ctx.lineCap = rng.next() > 0.5 ? 'round' : 'butt';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, startAngle + arcLen);
+    ctx.stroke();
+  }
+}
+
+function overlayDashedGrid(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const gridSize = Math.max(10, Math.floor(30 * elementScale));
+  const cols = Math.ceil(w / gridSize) + 1;
+  const rows = Math.ceil(h / gridSize) + 1;
+  for (let r = 0; r < rows; r++) {
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const dashLen = rng.nextFloat(2, 15) * elementScale;
+    const gapLen = rng.nextFloat(2, 15) * elementScale;
+    ctx.strokeStyle = rgba(color, 0.05 + rng.next() * 0.12);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.5);
+    ctx.setLineDash([dashLen, gapLen]);
+    ctx.beginPath();
+    ctx.moveTo(0, r * gridSize);
+    ctx.lineTo(w, r * gridSize);
+    ctx.stroke();
+  }
+  for (let c = 0; c < cols; c++) {
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const dashLen = rng.nextFloat(2, 15) * elementScale;
+    const gapLen = rng.nextFloat(2, 15) * elementScale;
+    ctx.strokeStyle = rgba(color, 0.05 + rng.next() * 0.12);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.5);
+    ctx.setLineDash([dashLen, gapLen]);
+    ctx.beginPath();
+    ctx.moveTo(c * gridSize, 0);
+    ctx.lineTo(c * gridSize, h);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+function overlayNoiseContours(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition, noiseFn: NoiseFunction2D, fbm: NoiseFunction2D) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const levels = rng.nextInt(5, 15);
+  const resolution = Math.max(1, Math.floor(3 * elementScale));
+  for (let level = 0; level < levels; level++) {
+    const threshold = level / levels;
+    const color = palette[level % palette.length];
+    const alpha = 0.04 + (level / levels) * 0.12;
+    ctx.strokeStyle = rgba(color, alpha);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.4);
+    ctx.beginPath();
+    for (let y = 0; y < h; y += resolution) {
+      for (let x = 0; x < w; x += resolution) {
+        const n = fbm(x / w * scene.complexity * 5, y / h * scene.complexity * 5) * 0.5 + 0.5;
+        if (Math.abs(n - threshold) < 0.015) {
+          ctx.rect(x, y, resolution, resolution);
+        }
+      }
+    }
+    ctx.stroke();
+  }
+}
+
+function overlayScatteredTriangles(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const count = rng.nextInt(10, 50);
+  for (let i = 0; i < count; i++) {
+    const cx = rng.nextFloat(0, w);
+    const cy = rng.nextFloat(0, h);
+    const size = rng.nextFloat(3, 100) * elementScale;
+    const rotation = rng.nextFloat(0, Math.PI * 2);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const alpha = 0.04 + rng.next() * 0.2;
+    const filled = rng.next() > 0.4;
+    ctx.beginPath();
+    for (let v = 0; v < 3; v++) {
+      const angle = rotation + (v / 3) * Math.PI * 2;
+      const r = size * rng.nextFloat(0.6, 1.4);
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      if (v === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    if (filled) {
+      ctx.fillStyle = rgba(color, alpha * 0.4);
+      ctx.fill();
+    }
+    ctx.strokeStyle = rgba(color, alpha);
+    ctx.lineWidth = Math.max(0.3, elementScale * 0.5);
+    ctx.stroke();
+  }
+}
+
 // ==================== Shared Backgrounds ====================
 
 function bgSolid(ctx: CanvasRenderingContext2D, w: number, h: number, color: string) {
@@ -565,6 +992,129 @@ function applyVignette(ctx: CanvasRenderingContext2D, w: number, h: number, inte
   ctx.fillRect(0, 0, w, h);
 }
 
+function applyScanlines(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG) {
+  const spacing = rng.nextInt(1, 3);
+  ctx.fillStyle = 'rgba(0,0,0,0.04)';
+  for (let y = 0; y < h; y += spacing) {
+    ctx.fillRect(0, y, w, 1);
+  }
+}
+
+function applyPosterize(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG) {
+  const levels = rng.nextInt(3, 8);
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const step = 255 / levels;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = Math.round(data[i] / step) * step;
+    data[i + 1] = Math.round(data[i + 1] / step) * step;
+    data[i + 2] = Math.round(data[i + 2] / step) * step;
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function applyEdgeHighlight(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const edgeData = new Uint8ClampedArray(data.length);
+  const threshold = 30;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = (y * w + x) * 4;
+      const idxL = (y * w + (x - 1)) * 4;
+      const idxR = (y * w + (x + 1)) * 4;
+      const idxU = ((y - 1) * w + x) * 4;
+      const idxD = ((y + 1) * w + x) * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const gx = data[idxR + ch] - data[idxL + ch];
+        const gy = data[idxD + ch] - data[idxU + ch];
+        const mag = Math.sqrt(gx * gx + gy * gy);
+        edgeData[idx + ch] = mag > threshold ? Math.min(255, mag * 2) : 0;
+      }
+      edgeData[idx + 3] = edgeData[idx] > 0 ? 120 : 0;
+    }
+  }
+  const edgeImage = new ImageData(edgeData, w, h);
+  ctx.putImageData(edgeImage, 0, 0);
+}
+
+function applyChromaticAberration(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG) {
+  const offset = rng.nextInt(2, 6);
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const original = new Uint8ClampedArray(data);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const rIdx = (y * w + Math.min(w - 1, x + offset)) * 4;
+      const bIdx = (y * w + Math.max(0, x - offset)) * 4;
+      data[idx] = original[rIdx];
+      data[idx + 1] = original[idx + 1];
+      data[idx + 2] = original[bIdx + 2];
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+function applyRadialBlur(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG) {
+  const cx = w / 2, cy = h / 2;
+  const passes = rng.nextInt(4, 8);
+  const strength = rng.nextFloat(0.002, 0.008);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.08;
+  for (let i = 0; i < passes; i++) {
+    const angle = (i / passes) * strength;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.scale(1 + angle * 0.5, 1 + angle * 0.5);
+    ctx.translate(-cx, -cy);
+    ctx.drawImage(ctx.canvas, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+}
+
+function applyColorShift(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG) {
+  const hueShift = rng.nextFloat(0, 360);
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i] / 255;
+    const g = data[i + 1] / 255;
+    const b = data[i + 2] / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    let h2 = 0;
+    const s = max === 0 ? 0 : d / max;
+    const v = max;
+    if (d !== 0) {
+      if (max === r) h2 = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+      else if (max === g) h2 = ((b - r) / d + 2) / 6;
+      else h2 = ((r - g) / d + 4) / 6;
+    }
+    h2 = (h2 * 360 + hueShift) % 360;
+    if (h2 < 0) h2 += 360;
+    const hi = h2 / 60;
+    const c = v * s;
+    const x2 = c * (1 - Math.abs((hi % 2) - 1));
+    const m = v - c;
+    let r2 = 0, g2 = 0, b2 = 0;
+    if (hi < 1) { r2 = c; g2 = x2; }
+    else if (hi < 2) { r2 = x2; g2 = c; }
+    else if (hi < 3) { g2 = c; b2 = x2; }
+    else if (hi < 4) { g2 = x2; b2 = c; }
+    else if (hi < 5) { r2 = x2; b2 = c; }
+    else { r2 = c; b2 = x2; }
+    data[i] = Math.round((r2 + m) * 255);
+    data[i + 1] = Math.round((g2 + m) * 255);
+    data[i + 2] = Math.round((b2 + m) * 255);
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
 // ==================== Main Renderer ====================
 
 const PRIMARY_RENDERERS: Record<VisualMode, (
@@ -589,6 +1139,14 @@ const BG_RENDERERS = [
   (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => bgNoise(ctx, w, h, fbm, palette, noiseScale),
   (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => bgRadialGradient(ctx, w, h, palette),
   (ctx: CanvasRenderingContext2D, w: number, h: number, palette: string[], rng: RNG, fbm: NoiseFunction2D, noiseScale: number) => { bgSolid(ctx, w, h, palette[0]); },
+];
+
+const ALL_OVERLAY_TYPES = [
+  'voronoi', 'triangles', 'hexgrid', 'scratches', 'dots', 'rings',
+  'crosshatch', 'dotGradient', 'waveInterference', 'spiralOverlay',
+  'gridDistortion', 'concentricSquares', 'randomPolygons', 'barcodeLines',
+  'bubbleField', 'stippleGradient', 'chevronPattern', 'circlePacking',
+  'arcSegments', 'dashedGrid', 'noiseContours', 'scatteredTriangles',
 ];
 
 export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
@@ -616,11 +1174,9 @@ export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
   renderer(ctx, w, h, scene, rng, noiseFn, fbm);
   onProgress?.(0.5);
 
-  // 4. Composited overlay layers (2-5 random overlays based on scene parameters)
-  const overlayCount = 2 + Math.floor(scene.density * 3);
-  const overlayTypes = rng.shuffle([
-    'voronoi', 'triangles', 'hexgrid', 'scratches', 'dots', 'rings',
-  ]);
+  // 4. Composited overlay layers
+  const overlayCount = scene.overlayCount;
+  const overlayTypes = rng.shuffle(ALL_OVERLAY_TYPES);
 
   for (let i = 0; i < Math.min(overlayCount, overlayTypes.length); i++) {
     const overlay = overlayTypes[i];
@@ -644,6 +1200,54 @@ export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
       case 'rings':
         overlayConcentricRings(ctx, w, h, rng, scene.palette, Math.floor(3 + scene.complexity * 10), scene.lineWidth);
         break;
+      case 'crosshatch':
+        overlayCrosshatch(ctx, w, h, rng, scene, noiseFn);
+        break;
+      case 'dotGradient':
+        overlayDotGradient(ctx, w, h, rng, scene, noiseFn);
+        break;
+      case 'waveInterference':
+        overlayWaveInterference(ctx, w, h, rng, scene);
+        break;
+      case 'spiralOverlay':
+        overlaySpiralOverlay(ctx, w, h, rng, scene);
+        break;
+      case 'gridDistortion':
+        overlayGridDistortion(ctx, w, h, rng, scene, noiseFn);
+        break;
+      case 'concentricSquares':
+        overlayConcentricSquares(ctx, w, h, rng, scene);
+        break;
+      case 'randomPolygons':
+        overlayRandomPolygons(ctx, w, h, rng, scene);
+        break;
+      case 'barcodeLines':
+        overlayBarcodeLines(ctx, w, h, rng, scene);
+        break;
+      case 'bubbleField':
+        overlayBubbleField(ctx, w, h, rng, scene);
+        break;
+      case 'stippleGradient':
+        overlayStippleGradient(ctx, w, h, rng, scene, noiseFn);
+        break;
+      case 'chevronPattern':
+        overlayChevronPattern(ctx, w, h, rng, scene);
+        break;
+      case 'circlePacking':
+        overlayCirclePacking(ctx, w, h, rng, scene);
+        break;
+      case 'arcSegments':
+        overlayArcSegments(ctx, w, h, rng, scene);
+        break;
+      case 'dashedGrid':
+        overlayDashedGrid(ctx, w, h, rng, scene);
+        break;
+      case 'noiseContours':
+        overlayNoiseContours(ctx, w, h, rng, scene, noiseFn, fbm);
+        break;
+      case 'scatteredTriangles':
+        overlayScatteredTriangles(ctx, w, h, rng, scene);
+        break;
     }
   }
   onProgress?.(0.7);
@@ -661,10 +1265,17 @@ export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
   ctx.globalAlpha = 1;
   onProgress?.(0.8);
 
-  // 7. Post-processing
-  applyGrain(ctx, w, h, scene.grainIntensity, rng);
-  applyGlow(ctx, w, h, scene.glowIntensity);
-  applyVignette(ctx, w, h, 0.4 + scene.contrast * 0.2);
+  // 7. Post-processing (driven by postProcessMask bits)
+  const mask = scene.postProcessMask;
+  if (mask & 1) applyGrain(ctx, w, h, scene.grainIntensity, rng);
+  if (mask & 2) applyGlow(ctx, w, h, scene.glowIntensity);
+  if (mask & 4) applyVignette(ctx, w, h, 0.4 + scene.contrast * 0.2);
+  if (mask & 8) applyScanlines(ctx, w, h, rng);
+  if (mask & 16) applyPosterize(ctx, w, h, rng);
+  if (mask & 32) applyEdgeHighlight(ctx, w, h, rng);
+  if (mask & 64) applyChromaticAberration(ctx, w, h, rng);
+  if (mask & 128) applyColorShift(ctx, w, h, rng);
+  if (mask & 256) applyRadialBlur(ctx, w, h, rng);
   onProgress?.(1.0);
 
   return canvas;
