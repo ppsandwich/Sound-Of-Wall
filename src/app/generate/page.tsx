@@ -151,6 +151,8 @@ export default function GeneratePage() {
     try {
       const seed = hashToSeed(audioHash);
       const scene = generateScene(seed, audioFeatures, selectedStyle);
+      console.log('[SOW] Audio Features:', JSON.stringify(audioFeatures, null, 2));
+      console.log('[SOW] Seed:', seed, 'Visual Mode:', scene.visualMode, 'Density:', scene.density.toFixed(2), 'Complexity:', scene.complexity.toFixed(2));
       setSceneDefinition(scene);
 
       const response = await fetch('/api/generate', {

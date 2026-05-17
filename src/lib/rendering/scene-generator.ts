@@ -32,17 +32,46 @@ const ALL_MODES: VisualMode[] = [
 ];
 
 function selectVisualMode(features: AudioFeatures, rng: RNG): VisualMode {
-  if (features.noisiness > 0.6 && features.transientSharpness > 0.5) return 'expressionist';
-  if (features.repetition > 0.6 && features.harmonicDensity > 0.5) return 'concentric';
-  if (features.rhythmicComplexity > 0.6 && features.beatDensity > 0.5) return 'mosaic';
-  if (features.spectralSpread > 0.6 && features.dynamicRange > 0.4) return 'topographic';
-  if (features.brightness > 0.6 && features.highEnergy > 0.5) return 'hatching';
-  if (features.subBassEnergy > 0.5 && features.loudness > 0.5) return 'fractal-tree';
-  if (features.warmth > 0.5 && features.midEnergy > 0.4) return 'constellation';
-  if (features.spectralCentroid > 0.5 && features.transitionDensity > 0.4) return 'scatter';
-  if (features.bpm > 130 && features.beatDensity > 0.4) return 'geometric';
-  if (features.dynamicRange > 0.3 && features.energyEvolution.length > 0) return 'waveform';
-  return rng.pick(ALL_MODES);
+  const scores = ALL_MODES.map((mode) => {
+    let score = 0;
+    switch (mode) {
+      case 'waveform':
+        score = features.dynamicRange * 2 + features.energyEvolution.length / 16 + features.midEnergy;
+        break;
+      case 'fractal-tree':
+        score = features.subBassEnergy * 2 + features.harmonicDensity + features.loudness;
+        break;
+      case 'constellation':
+        score = features.warmth * 2 + features.midEnergy + (1 - features.noisiness);
+        break;
+      case 'topographic':
+        score = features.spectralSpread * 2 + features.dynamicRange + features.noisiness;
+        break;
+      case 'expressionist':
+        score = features.noisiness * 2 + features.transientSharpness * 2 + features.dynamicRange;
+        break;
+      case 'geometric':
+        score = features.rhythmicComplexity * 2 + features.beatDensity + (features.bpm / 200);
+        break;
+      case 'hatching':
+        score = features.brightness * 2 + features.highEnergy + features.spectralCentroid;
+        break;
+      case 'mosaic':
+        score = features.beatDensity * 2 + features.rhythmicComplexity + features.transitionDensity;
+        break;
+      case 'concentric':
+        score = features.repetition * 2 + features.harmonicDensity + features.warmth;
+        break;
+      case 'scatter':
+        score = features.transitionDensity * 2 + features.spectralCentroid + features.noisiness;
+        break;
+    }
+    score += rng.next() * 4.0;
+    return { mode, score };
+  });
+
+  scores.sort((a, b) => b.score - a.score);
+  return scores[0].mode;
 }
 
 function selectColorStrategy(features: AudioFeatures, rng: RNG): ColorStrategy {
