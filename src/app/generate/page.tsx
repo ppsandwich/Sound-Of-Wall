@@ -139,7 +139,6 @@ export default function GeneratePage() {
       const scene = generateScene(seed, features);
       console.log('[SOW] Audio Features:', JSON.stringify(features, null, 2));
       console.log('[SOW] Seed:', seed, 'Visual Mode:', scene.visualMode, 'Style:', scene.stylePreset, 'Density:', scene.density.toFixed(2), 'Complexity:', scene.complexity.toFixed(2), 'Scale:', scene.scale.toFixed(2), 'ScaleRange:', scene.scaleMin.toFixed(2), '-', scene.scaleMax.toFixed(2));
-      setSceneDefinition(scene);
       setIsGenerating(true);
 
       const response = await fetch('/api/generate', {
@@ -158,6 +157,8 @@ export default function GeneratePage() {
         setGenerationId(data.generationId);
       }
       setIsGenerating(false);
+
+      setSceneDefinition(scene);
     } catch (err) {
       console.error('Analysis failed:', err);
     } finally {
