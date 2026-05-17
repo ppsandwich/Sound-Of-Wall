@@ -36,7 +36,6 @@ export function computeFFT(signal: Float32Array, start: number, size: number): F
     re[i] = signal[start + i] || 0;
   }
 
-  // Cooley-Tukey radix-2 FFT (in-place, decimation-in-time)
   for (let i = 0, j = 0; i < N; i++) {
     if (i < j) {
       let tmp = re[i]; re[i] = re[j]; re[j] = tmp;
@@ -83,7 +82,7 @@ export function computeFFT(signal: Float32Array, start: number, size: number): F
   return magnitudes;
 }
 
-export function spectralCentroid(magnitudes: number[]): number {
+export function spectralCentroidRaw(magnitudes: number[]): number {
   let weightedSum = 0;
   let totalMag = 0;
   for (let i = 0; i < magnitudes.length; i++) {
@@ -151,7 +150,7 @@ export function computeRMS(signal: Float32Array, start: number, length: number):
 }
 
 export function computeLoudness(rmsValues: number[]): number {
-  if (rmsValues.length === 0) return 0;
+  if (rmsValues.length === 0) return -60;
   let sum = 0;
   for (let i = 0; i < rmsValues.length; i++) {
     const db = rmsValues[i] > 0 ? 20 * Math.log10(rmsValues[i]) : -60;
@@ -219,7 +218,7 @@ export function computeTensionCurves(signal: Float32Array, spectralData: number[
 
   for (let i = 0; i < frames; i++) {
     const energy = computeRMS(signal, i * samplesPerFrame, samplesPerFrame);
-    const centroid = spectralCentroid(spectralData[i]);
+    const centroid = spectralCentroidRaw(spectralData[i]);
     const maxCentroid = spectralData[i].length > 0 ? spectralData[i].length : 1;
     const normalizedCentroid = centroid / maxCentroid;
     result[i] = 0.5 * energy + 0.5 * normalizedCentroid;
@@ -270,6 +269,69 @@ export function computeRhythmicComplexity(onsets: number[]): number {
   }
   variance /= intervals.length;
   return Math.sqrt(variance) / mean;
+}
+
+function computeSubBassEnergy(fftFrames: number[][]): number {
+  if (fftFrames.length === 0) return 0;
+  let total = 0;
+  const cutoff = Math.floor(fftFrames[0].length * 0.05);
+  for (const frame of fftFrames) {
+    let energy = 0;
+    for (let i = 0; i < Math.min(cutoff, frame.length); i++) {
+      energy += frame[i] * frame[i];
+    }
+    total += Math.sqrt(energy / Math.max(1, cutoff));
+  }
+  return total / fftFrames.length;
+}
+
+function computeMidEnergy(fftFrames: number[][]): number {
+  if (fftFrames.length === 0) return 0;
+  let total = 0;
+  const lo = Math.floor(fftFrames[0].length * 0.05);
+  const hi = Math.floor(fftFrames[0].length * 0.4);
+  for (const frame of fftFrames) {
+    let energy = 0;
+    let count = 0;
+    for (let i = lo; i < Math.min(hi, frame.length); i++) {
+      energy += frame[i] * frame[i];
+      count++;
+    }
+    total += Math.sqrt(energy / Math.max(1, count));
+  }
+  return total / fftFrames.length;
+}
+
+function computeHighEnergy(fftFrames: number[][]): number {
+  if (fftFrames.length === 0) return 0;
+  let total = 0;
+  const lo = Math.floor(fftFrames[0].length * 0.4);
+  for (const frame of fftFrames) {
+    let energy = 0;
+    let count = 0;
+    for (let i = lo; i < frame.length; i++) {
+      energy += frame[i] * frame[i];
+      count++;
+    }
+    total += Math.sqrt(energy / Math.max(1, count));
+  }
+  return total / fftFrames.length;
+}
+
+function computeSpectralSpread(fftFrames: number[][]): number {
+  if (fftFrames.length === 0) return 0;
+  let totalSpread = 0;
+  for (const frame of fftFrames) {
+    const centroid = spectralCentroidRaw(frame);
+    let weightedVariance = 0;
+    let totalMag = 0;
+    for (let i = 0; i < frame.length; i++) {
+      weightedVariance += (i - centroid) * (i - centroid) * frame[i];
+      totalMag += frame[i];
+    }
+    totalSpread += totalMag > 0 ? Math.sqrt(weightedVariance / totalMag) : 0;
+  }
+  return totalSpread / fftFrames.length;
 }
 
 function detectOnsets(signal: Float32Array, sampleRate: number): number[] {
@@ -378,6 +440,10 @@ function computeTransitionDensity(spectralData: number[][]): number {
   return totalChange / (spectralData.length - 1);
 }
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
 export async function extractFeatures(buffer: AudioBuffer): Promise<AudioFeatures> {
   const signal = normalizeAudioBuffer(buffer);
   const sampleRate = buffer.sampleRate;
@@ -405,27 +471,42 @@ export async function extractFeatures(buffer: AudioBuffer): Promise<AudioFeature
   let brightnessSum = 0;
   let warmthSum = 0;
   for (const frame of fftFrames) {
-    centroidSum += spectralCentroid(frame);
+    centroidSum += spectralCentroidRaw(frame);
     brightnessSum += spectralBrightness(frame);
     warmthSum += spectralWarmth(frame);
   }
   const nFrames = fftFrames.length || 1;
 
+  const rawBeatDensity = computeBeatDensity(onsets, duration);
+  const rawTransientSharpness = computeTransientSharpness(signal, onsets);
+  const rawLoudness = computeLoudness(Array.from(rmsValues));
+  const rawDynamicRange = computeDynamicRange(Array.from(rmsValues));
+  const rawTransitionDensity = computeTransitionDensity(fftFrames);
+  const rawSpectralSpread = computeSpectralSpread(fftFrames);
+  const rawSubBass = computeSubBassEnergy(fftFrames);
+  const rawMid = computeMidEnergy(fftFrames);
+  const rawHigh = computeHighEnergy(fftFrames);
+
   return {
     bpm,
-    beatDensity: computeBeatDensity(onsets, duration),
-    transientSharpness: computeTransientSharpness(signal, onsets),
-    rhythmicComplexity: computeRhythmicComplexity(onsets),
-    spectralCentroid: centroidSum / nFrames,
-    brightness: brightnessSum / nFrames,
-    warmth: warmthSum / nFrames,
-    noisiness: spectralNoisiness(fftFrames),
-    harmonicDensity: computeHarmonicDensity(fftFrames),
-    loudness: computeLoudness(Array.from(rmsValues)),
-    dynamicRange: computeDynamicRange(Array.from(rmsValues)),
+    beatDensity: clamp01(rawBeatDensity / 8),
+    transientSharpness: clamp01(rawTransientSharpness * 5),
+    rhythmicComplexity: clamp01(computeRhythmicComplexity(onsets)),
+    spectralCentroid: clamp01(centroidSum / nFrames / (fftFrames[0]?.length ?? 1)),
+    brightness: clamp01(brightnessSum / nFrames),
+    warmth: clamp01(warmthSum / nFrames),
+    noisiness: clamp01(spectralNoisiness(fftFrames) * 3),
+    harmonicDensity: clamp01(computeHarmonicDensity(fftFrames)),
+    loudness: clamp01((rawLoudness + 60) / 60),
+    dynamicRange: clamp01(rawDynamicRange / 60),
     energyEvolution: computeEnergyEvolution(signal, 16),
-    repetition: computeRepetition(signal),
-    transitionDensity: computeTransitionDensity(fftFrames),
+    repetition: clamp01(computeRepetition(signal)),
+    transitionDensity: clamp01(rawTransitionDensity * 2),
     tensionCurves: computeTensionCurves(signal, fftFrames),
+    subBassEnergy: clamp01(rawSubBass * 8),
+    midEnergy: clamp01(rawMid * 4),
+    highEnergy: clamp01(rawHigh * 6),
+    spectralSpread: clamp01(rawSpectralSpread / (fftFrames[0]?.length ?? 1) * 3),
+    stereoWidth: 0,
   };
 }

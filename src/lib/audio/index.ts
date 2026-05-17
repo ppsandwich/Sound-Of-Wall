@@ -3,7 +3,7 @@ export {
   normalizeAudioBuffer,
   extractFeatures,
   computeFFT,
-  spectralCentroid,
+  spectralCentroidRaw,
   spectralBrightness,
   spectralWarmth,
   spectralNoisiness,

@@ -17,12 +17,17 @@ const PLACEHOLDER_FEATURES: AudioFeatures = {
   warmth: 0.5,
   noisiness: 0.3,
   harmonicDensity: 0.5,
-  loudness: -12,
-  dynamicRange: 20,
+  loudness: 0.3,
+  dynamicRange: 0.4,
   energyEvolution: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.7, 0.6],
   repetition: 0.4,
   transitionDensity: 0.5,
   tensionCurves: [0.3, 0.5, 0.7, 0.6, 0.8, 0.5, 0.4, 0.6],
+  subBassEnergy: 0.3,
+  midEnergy: 0.5,
+  highEnergy: 0.4,
+  spectralSpread: 0.5,
+  stereoWidth: 0,
 };
 
 const STEPS = [

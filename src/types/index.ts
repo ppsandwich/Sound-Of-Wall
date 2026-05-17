@@ -1,5 +1,9 @@
 export type StylePreset = 'ethereal' | 'noir' | 'brutalist' | 'psychedelic' | 'minimal' | 'retro-futurist';
 
+export type CompositionMode = 'centered' | 'scattered' | 'flowing' | 'radial' | 'grid' | 'organic';
+
+export type ColorStrategy = 'monochrome' | 'duotone' | 'triadic' | 'full-spectrum' | 'warm-dominant' | 'cool-dominant';
+
 export interface AudioFeatures {
   bpm: number;
   beatDensity: number;
@@ -16,6 +20,11 @@ export interface AudioFeatures {
   repetition: number;
   transitionDensity: number;
   tensionCurves: number[];
+  subBassEnergy: number;
+  midEnergy: number;
+  highEnergy: number;
+  spectralSpread: number;
+  stereoWidth: number;
 }
 
 export interface SceneDefinition {
@@ -36,6 +45,19 @@ export interface SceneDefinition {
   radialDensity: number;
   voronoiCellCount: number;
   splineTension: number;
+  compositionMode: CompositionMode;
+  colorStrategy: ColorStrategy;
+  layerMask: number;
+  dominantFrequencyBand: number;
+  rhythmPattern: number[];
+  contrastLevel: number;
+  spatialDepth: number;
+  motionBlur: number;
+  waveAmplitude: number;
+  waveFrequency: number;
+  ringCount: number;
+  gridDensity: number;
+  flowFieldStrength: number;
 }
 
 export interface Generation {
