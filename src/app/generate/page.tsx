@@ -178,18 +178,21 @@ export default function GeneratePage() {
       thumbCanvas.height = 512;
       const thumbCtx = thumbCanvas.getContext('2d')!;
       thumbCtx.drawImage(canvas, 0, 0, 512, 512);
-      const thumbBlob = await canvasToBlob(thumbCanvas);
+      const thumbBlob = await canvasToBlob(thumbCanvas, 'image/jpeg', 0.85);
 
       const formData = new FormData();
       formData.append('image', fullBlob, 'artwork.png');
-      formData.append('thumbnail', thumbBlob, 'artwork-512.png');
+      formData.append('thumbnail', thumbBlob, 'artwork-512.jpg');
 
       const res = await fetch(`/api/generation/${genId}/image`, {
         method: 'POST',
         body: formData,
       });
+      const result = await res.json();
       if (!res.ok) {
-        console.error('Image upload failed:', await res.text());
+        console.error('Image upload failed:', result);
+      } else {
+        console.log('[SOW] Image stored:', result.url?.substring(0, 60));
       }
     } catch (err) {
       console.error('Failed to store artwork image:', err);

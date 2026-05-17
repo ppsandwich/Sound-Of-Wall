@@ -7,10 +7,19 @@ export async function GET(request: Request) {
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
   const pageSize = Math.max(1, Math.min(50, parseInt(searchParams.get('pageSize') ?? '12', 10)));
   const offset = (page - 1) * pageSize;
+  const debug = searchParams.get('debug') === 'true';
 
   try {
     const countResult = await sql`SELECT COUNT(*) as total FROM generations`;
     const total = Number((countResult[0] as { total: string | number }).total);
+
+    if (debug) {
+      const rows = await sql`
+        SELECT id, filename, image_url IS NOT NULL as has_image, LENGTH(image_url) as url_len, created_at
+        FROM generations ORDER BY created_at DESC LIMIT 10
+      `;
+      return NextResponse.json({ total, rows });
+    }
 
     const rows = await sql`
       SELECT id, audio_hash, seed, style_preset, feature_vector, scene_definition, image_url, filename, created_at
