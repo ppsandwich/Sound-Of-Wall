@@ -1,6 +1,7 @@
 import { SceneDefinition, VisualMode } from '@/types';
 import { createRNG, RNG } from '@/lib/prng';
 import { seededNoise2D, createFBM, createTurbulence, createRidgedNoise, NoiseFunction2D } from '@/lib/noise';
+import { getRandomEmoji, getRandomIcon, drawEmoji, drawIconWithEffects, ICON_LIBRARY } from './icons';
 
 export interface RenderOptions {
   width: number;
@@ -639,6 +640,64 @@ function overlayScatteredTriangles(ctx: CanvasRenderingContext2D, w: number, h: 
   }
 }
 
+function overlayEmojiScatter(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette, glowIntensity } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const count = rng.nextInt(4, 20);
+  for (let i = 0; i < count; i++) {
+    const x = rng.nextFloat(w * 0.05, w * 0.95);
+    const y = rng.nextFloat(h * 0.05, h * 0.95);
+    const size = rng.nextFloat(12, 80) * elementScale;
+    const emoji = getRandomEmoji(rng);
+    const bgColor = palette[rng.nextInt(0, palette.length - 1)];
+    const bgAlpha = 0.1 + rng.next() * 0.3;
+    const rotation = rng.nextFloat(-0.3, 0.3);
+    drawEmoji(ctx, emoji, x, y, size, bgColor, bgAlpha, rotation);
+  }
+}
+
+function overlayIconScatter(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette, glowIntensity, lineWidth } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const count = rng.nextInt(5, 25);
+  for (let i = 0; i < count; i++) {
+    const x = rng.nextFloat(w * 0.05, w * 0.95);
+    const y = rng.nextFloat(h * 0.05, h * 0.95);
+    const size = rng.nextFloat(8, 60) * elementScale;
+    const icon = getRandomIcon(rng);
+    const color = palette[rng.nextInt(0, palette.length - 1)];
+    const alpha = 0.08 + rng.next() * 0.35;
+    const rotation = rng.nextFloat(0, Math.PI * 2);
+    const glowColor = rng.next() > 0.5 ? palette[rng.nextInt(0, palette.length - 1)] : undefined;
+    drawIconWithEffects(ctx, icon, x, y, size, color, alpha, rotation, glowColor, glowIntensity);
+  }
+}
+
+function overlayIllustrationCluster(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, scene: SceneDefinition) {
+  const { palette, glowIntensity, complexity } = scene;
+  const elementScale = rng.nextFloat(scene.scaleMin, scene.scaleMax);
+  const clusterCount = rng.nextInt(1, 3);
+  for (let c = 0; c < clusterCount; c++) {
+    const cx = rng.nextFloat(w * 0.15, w * 0.85);
+    const cy = rng.nextFloat(h * 0.15, h * 0.85);
+    const clusterRadius = rng.nextFloat(50, 200) * elementScale;
+    const itemCount = rng.nextInt(3, 8 + Math.floor(complexity * 8));
+    const iconsInCluster = rng.shuffle([...ICON_LIBRARY]);
+    for (let i = 0; i < itemCount; i++) {
+      const angle = rng.nextFloat(0, Math.PI * 2);
+      const dist = rng.nextFloat(0, clusterRadius);
+      const x = cx + Math.cos(angle) * dist;
+      const y = cy + Math.sin(angle) * dist;
+      const size = rng.nextFloat(6, 40) * elementScale * (1 - dist / clusterRadius * 0.5);
+      const icon = iconsInCluster[i % iconsInCluster.length];
+      const color = palette[(c + i) % palette.length];
+      const alpha = 0.1 + rng.next() * 0.3 * (1 - dist / clusterRadius);
+      const rotation = rng.nextFloat(0, Math.PI * 2);
+      drawIconWithEffects(ctx, icon, x, y, size, color, alpha, rotation, palette[c % palette.length], glowIntensity * 0.5);
+    }
+  }
+}
+
 // ==================== Shared Backgrounds ====================
 
 function bgSolid(ctx: CanvasRenderingContext2D, w: number, h: number, color: string) {
@@ -1147,6 +1206,7 @@ const ALL_OVERLAY_TYPES = [
   'gridDistortion', 'concentricSquares', 'randomPolygons', 'barcodeLines',
   'bubbleField', 'stippleGradient', 'chevronPattern', 'circlePacking',
   'arcSegments', 'dashedGrid', 'noiseContours', 'scatteredTriangles',
+  'emojiScatter', 'iconScatter', 'illustrationCluster',
 ];
 
 export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
@@ -1247,6 +1307,15 @@ export function renderArtwork(options: RenderOptions): HTMLCanvasElement {
         break;
       case 'scatteredTriangles':
         overlayScatteredTriangles(ctx, w, h, rng, scene);
+        break;
+      case 'emojiScatter':
+        overlayEmojiScatter(ctx, w, h, rng, scene);
+        break;
+      case 'iconScatter':
+        overlayIconScatter(ctx, w, h, rng, scene);
+        break;
+      case 'illustrationCluster':
+        overlayIllustrationCluster(ctx, w, h, rng, scene);
         break;
     }
   }
