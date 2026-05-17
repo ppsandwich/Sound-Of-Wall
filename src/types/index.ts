@@ -1,6 +1,16 @@
 export type StylePreset = 'ethereal' | 'noir' | 'brutalist' | 'psychedelic' | 'minimal' | 'retro-futurist';
 
-export type CompositionMode = 'centered' | 'scattered' | 'flowing' | 'radial' | 'grid' | 'organic';
+export type VisualMode =
+  | 'waveform'
+  | 'fractal-tree'
+  | 'constellation'
+  | 'topographic'
+  | 'expressionist'
+  | 'geometric'
+  | 'hatching'
+  | 'mosaic'
+  | 'concentric'
+  | 'scatter';
 
 export type ColorStrategy = 'monochrome' | 'duotone' | 'triadic' | 'full-spectrum' | 'warm-dominant' | 'cool-dominant';
 
@@ -30,34 +40,20 @@ export interface AudioFeatures {
 export interface SceneDefinition {
   seed: number;
   palette: string[];
-  geometryDensity: number;
-  noiseScale: number;
-  symmetry: number;
-  particleCount: number;
-  energyCurve: number[];
   stylePreset: StylePreset;
-  curveComplexity: number;
+  visualMode: VisualMode;
+  colorStrategy: ColorStrategy;
+  energyCurve: number[];
+  rhythmPattern: number[];
+  symmetry: number;
+  density: number;
+  scale: number;
+  complexity: number;
+  contrast: number;
   turbulence: number;
   grainIntensity: number;
-  lineWidth: number;
   glowIntensity: number;
-  bgGradientAngle: number;
-  radialDensity: number;
-  voronoiCellCount: number;
-  splineTension: number;
-  compositionMode: CompositionMode;
-  colorStrategy: ColorStrategy;
-  layerMask: number;
-  dominantFrequencyBand: number;
-  rhythmPattern: number[];
-  contrastLevel: number;
-  spatialDepth: number;
-  motionBlur: number;
-  waveAmplitude: number;
-  waveFrequency: number;
-  ringCount: number;
-  gridDensity: number;
-  flowFieldStrength: number;
+  lineWidth: number;
 }
 
 export interface Generation {
