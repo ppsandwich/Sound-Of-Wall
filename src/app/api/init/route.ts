@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initDatabase } from '@/lib/db';
+import { initDatabase, sql } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -12,6 +12,21 @@ export async function GET() {
         error: 'Failed to initialize database',
         detail: err instanceof Error ? err.message : String(err),
       },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE() {
+  try {
+    const countResult = await sql`SELECT COUNT(*) as total FROM generations`;
+    const total = Number((countResult[0] as { total: string | number }).total);
+    await sql`DELETE FROM generations`;
+    return NextResponse.json({ success: true, deleted: total });
+  } catch (err) {
+    console.error('Database clear error:', err);
+    return NextResponse.json(
+      { error: 'Failed to clear database', detail: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }
